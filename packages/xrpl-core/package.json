@@ -1,0 +1,21 @@
+{
+  "name": "bluesafe-xrpl",
+  "version": "0.1.0",
+  "description": "BlueSafe smart-contract layer on XRPL: Escrow, Multisig, NFT/SBT, Credentials, Verifier Pool",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "xrpl": "^4.0.0",
+    "ripple-binary-codec": "^2.0.0",
+    "ripple-keypairs": "^2.0.0",
+    "five-bells-condition": "^5.0.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0"
+  }
+}

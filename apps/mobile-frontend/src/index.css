@@ -1,0 +1,62 @@
+@import url('https://cdn.jsdelivr.net/gh/wanteddev/wanted-sans@v1.0.1/packages/wanted-sans/fonts/webfonts/variable/split/WantedSansVariable.min.css');
+
+:root {
+  --brand: #2f66f6;
+  --brand-dark: #173b8f;
+  --brand-soft: #eef4ff;
+  --cyan: #19c2b5;
+  --brand-bg: #f3f7ff;
+  --brand-entry: #101f4e;
+  --brand-shadow: rgba(47, 102, 246, 0.26);
+  --brand-shadow-strong: rgba(47, 102, 246, 0.34);
+  --home-blue: #2557d6;
+  --home-blue-soft: #3f73df;
+  --grey900: #191f28;
+  --grey800: #333d4b;
+  --grey700: #4e5968;
+  --grey600: #6b7684;
+  --grey500: #8b95a1;
+  --grey300: #d1d6db;
+  --grey200: #e5e8eb;
+  --grey100: #f2f4f6;
+  --grey50: #f9fafb;
+  --surface-block: #f7f9fc;
+  font-family: "Wanted Sans Variable", "Wanted Sans", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  color: var(--grey900);
+  background: #eef2f8;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: #eef2f8;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100dvh;
+  margin: 0;
+  overflow: hidden;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+#root {
+  min-height: 100dvh;
+}

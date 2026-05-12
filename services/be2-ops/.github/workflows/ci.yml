@@ -1,0 +1,72 @@
+# V4-A: build + Postgres-backed smoke (same flow as local `npm run smoke`).
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build-and-smoke:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: bluesafe_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d bluesafe_ci"
+          --health-interval 4s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/bluesafe_ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck / build
+        run: npm run build
+
+      - name: Smoke (memory not used — DATABASE_URL set)
+        run: npm run smoke
+
+  # W4: optional live rippled round-trip (set repository secret `XRPL_WSS_URL`, then run workflow manually).
+  xrpl-live-probe:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Live WSS probe (skipped if secret unset)
+        env:
+          XRPL_WSS_URL: ${{ secrets.XRPL_WSS_URL }}
+        run: |
+          if [ -z "$XRPL_WSS_URL" ]; then
+            echo "XRPL_WSS_URL secret not set — skipping live probe."
+            exit 0
+          fi
+          npm run xrpl-live-probe

@@ -1,0 +1,44 @@
+# Example Prometheus alerting rules for Backend2 (P0 Tx policy / subscribe / outcomes).
+# Copy into your Prometheus `rule_files` or Operator PrometheusRule; tune thresholds for your SLOs.
+#
+# Prerequisite: scrape `GET /internal/prometheus` (optionally with `METRICS_SCRAPE_TOKEN`).
+
+groups:
+  - name: bluesafe-xrpl
+    interval: 30s
+    rules:
+      - alert: BluesafeXrplPolicyErrorsSpike
+        expr: increase(bluesafe_xrpl_policy_job_errors_total[15m]) > 8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: XRPL tx policy worker errors rising
+          description: Policy tick errors exceeded 8 in 15m — check API logs and rippled reachability.
+
+      - alert: BluesafeXrplSubscribeDisconnectsSpike
+        expr: increase(bluesafe_xrpl_subscribe_disconnect_cycles_total[30m]) > 20
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Subscribe WebSocket reconnect churn high
+          description: Many disconnect cycles — consider dedicated rippled / hub or review `XRPL_SUBSCRIBE_TX_MAX_PER_SEC` throttling.
+
+      - alert: BluesafeXrplTxStreamThrottledSustained
+        expr: increase(bluesafe_xrpl_subscribe_tx_stream_throttled_total[10m]) > 500
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: Transactions stream throttling is shedding load
+          description: High throttled count — expected if rate cap is set; raise cap or dedicated node if misses SLO.
+
+      - alert: BluesafeXrplManualReviewOutcomesSpike
+        expr: increase(bluesafe_xrpl_tx_outcome_classified_total{outcome="manual_review"}[1h]) > 50
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: Many XRPL txs classified as manual_review
+          description: Review operator console / disputed execution paths and `not_found_after_policy` volume.

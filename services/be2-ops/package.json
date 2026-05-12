@@ -1,0 +1,44 @@
+{
+  "name": "bluesafe-backend2",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "smoke": "node scripts/smoke-test.mjs",
+    "subscribe-soak": "node scripts/subscribe-soak.mjs",
+    "xrpl-live-probe": "node scripts/xrpl-live-probe.mjs",
+    "test": "echo \"No tests yet\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sghtao/bluesafe-backend2.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/sghtao/bluesafe-backend2/issues"
+  },
+  "homepage": "https://github.com/sghtao/bluesafe-backend2#readme",
+  "dependencies": {
+    "pg": "^8.16.0",
+    "express": "^5.2.1",
+    "multer": "^2.1.1",
+    "xrpl": "^4.6.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.15.5",
+    "@types/express": "^5.0.6",
+    "@types/multer": "^2.1.0",
+    "@types/node": "^25.6.2",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3"
+  }
+}

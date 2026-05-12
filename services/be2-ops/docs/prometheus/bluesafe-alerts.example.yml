@@ -1,0 +1,50 @@
+# Example Prometheus / Alertmanager rules for BlueSafe Backend2 (v6).
+# Copy into your Prometheus `rule_files` or Grafana Mimir ruler; tune thresholds per environment.
+
+groups:
+  - name: bluesafe-backend2
+    rules:
+      - alert: BluesafeReputationOutboundFailures
+        expr: increase(bluesafe_reputation_outbound_delivery_total{status="failure"}[15m]) > 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Reputation outbound webhook failures rising
+
+      - alert: BluesafeXrplPolicyExhausted
+        expr: increase(bluesafe_xrpl_policy_exhausted_total[1h]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: XRPL tx policy jobs exhausted (manual review likely)
+
+      - alert: BluesafeExportJobsFailing
+        expr: increase(bluesafe_export_jobs_failed_total[1h]) > 2
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: Async audit export jobs failing
+
+      # V7-B: subscribe worker must see validated ledger closes every few seconds on healthy hubs.
+      - alert: BluesafeXrplWatcherLedgerCloseStalled
+        expr: >
+          (bluesafe_xrpl_subscribe_connected > 0)
+          and (bluesafe_xrpl_subscribe_ledger_closed_events_total > 0)
+          and (bluesafe_xrpl_watcher_last_ledger_close_unixtime > 0)
+          and ((time() - bluesafe_xrpl_watcher_last_ledger_close_unixtime) > 180)
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: No validated ledgerClosed processed for 180s while subscribe is connected
+
+      - alert: BluesafeXrplSubscribeDisconnectBurst
+        expr: increase(bluesafe_xrpl_subscribe_disconnect_cycles_total[15m]) > 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: XRPL subscribe worker reconnecting frequently (check WSS hub / network)
