@@ -154,8 +154,8 @@ function App() {
     walletNetwork: '',
     tenantId: 'tenant_sarah_kim',
     landlordId: 'landlord_kim',
-    tenantAddress: 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh',
-    landlordAddress: 'rDTXLQ7ZKZVKz33zJbHjgVShjsBnqMBhmN',
+    tenantAddress: '',
+    landlordAddress: '',
     settlements: [],
     backendEvents: ['프론트 데모 상태로 시작했어요'],
   })
@@ -213,16 +213,8 @@ function App() {
     createDraftContract: async () => {
       if (app.contract) return app.contract
       return run('BE2 계약 draft 생성', async () => {
-        const contract = backendConfig.hasBe2
-          ? await bluesafeApi.createOperationalContract({ tenantId: app.tenantId, landlordId: app.landlordId })
-          : {
-              id: 'ctr_demo_001',
-              status: 'draft' as const,
-              tenantId: app.tenantId,
-              landlordId: app.landlordId,
-              startsAt: demoLeaseDates().startsAt.toISOString(),
-              endsAt: demoLeaseDates().endsAt.toISOString(),
-            }
+        if (!backendConfig.hasBe2) throw new Error('BE2 URL is not configured')
+        const contract = await bluesafeApi.createOperationalContract({ tenantId: app.tenantId, landlordId: app.landlordId })
         setApp((prev) => ({ ...prev, contract }))
         return contract
       })
@@ -234,44 +226,32 @@ function App() {
           await bluesafeApi.updateOperationalContractStatus(contract.id, 'escrow_pending')
         }
 
-        const xrplContract = backendConfig.hasBe1
-          ? await bluesafeApi.createXrplContract({
-              tenantAddress: app.tenantAddress,
-              landlordAddress: app.landlordAddress,
-              depositAmount: '17647000000',
-              stakeAmount: '1000000',
-              startsAt: '2026-06-01T00:00:00.000Z',
-              endsAt: '2027-05-31T00:00:00.000Z',
-              finishAfter: '2027-06-07T00:00:00.000Z',
-              cancelAfter: '2027-06-30T00:00:00.000Z',
-              tenantPii: 'Sarah Kim / USA / F-2',
-              landlordPii: 'Kim / verified landlord',
-              tenantEmail: 'sarah@example.com',
-            })
-          : {
-              id: 'be1_demo_001',
-              status: 'active' as const,
-              contractAccountAddress: 'rBlueSafeDemoEscrowAccount1234567',
-              depositAmount: '17647000000',
-              depositEscrowTxHash: 'F2A8B7C91D3DEMOXRPLESCROWTXHASH',
-              depositEscrowSequence: 824,
-              signerListTxHash: 'A91D3DEMO2OF3MULTISIGTXHASH',
-              startsAt: demoLeaseDates().startsAt.toISOString(),
-              endsAt: demoLeaseDates().endsAt.toISOString(),
-            }
+        if (!backendConfig.hasBe1) throw new Error('BE1 URL is not configured')
+        if (!app.tenantAddress || !app.landlordAddress) throw new Error('Tenant and landlord wallet addresses are required')
 
-        const txHash = xrplContract.depositEscrowTxHash ?? 'F2A8B7C91D3DEMOXRPLESCROWTXHASH'
-        const anchored = backendConfig.hasBe2
-          ? await bluesafeApi.anchorEscrow(contract.id, txHash)
-          : { ...contract, status: 'escrow_validated' as const, depositEscrowTxHash: txHash }
+        const xrplContract = await bluesafeApi.createXrplContract({
+          tenantAddress: app.tenantAddress,
+          landlordAddress: app.landlordAddress,
+          depositAmount: '17647000000',
+          stakeAmount: '1000000',
+          startsAt: '2026-06-01T00:00:00.000Z',
+          endsAt: '2027-05-31T00:00:00.000Z',
+          finishAfter: '2027-06-07T00:00:00.000Z',
+          cancelAfter: '2027-06-30T00:00:00.000Z',
+          tenantPii: 'tenant verified by BlueSafe',
+          landlordPii: 'landlord verified by BlueSafe',
+          tenantEmail: 'tenant@bluesafe.local',
+        })
 
-        if (backendConfig.hasBe2) {
-          await bluesafeApi.trackTx({
-            txHash,
-            txType: 'EscrowCreate',
-            account: xrplContract.contractAccountAddress ?? app.tenantAddress,
-          }).catch(() => undefined)
-        }
+        const txHash = xrplContract.depositEscrowTxHash
+        if (!txHash) throw new Error('BE1 did not return an escrow transaction hash')
+        const anchored = await bluesafeApi.anchorEscrow(contract.id, txHash)
+
+        await bluesafeApi.trackTx({
+          txHash,
+          txType: 'EscrowCreate',
+          account: xrplContract.contractAccountAddress ?? app.tenantAddress,
+        }).catch(() => undefined)
 
         setApp((prev) => ({ ...prev, contract: anchored, xrplContract }))
       })
@@ -287,24 +267,16 @@ function App() {
     landlordSignContract: async () => {
       await run('BE2 임대인 계약 동의', async () => {
         const contract = app.contract ?? await actions.createDraftContract()
-        const signed = backendConfig.hasBe2
-          ? await bluesafeApi.updateOperationalContractStatus(contract.id, contract.status === 'draft' ? 'escrow_pending' : contract.status)
-          : { ...contract, status: contract.status === 'draft' ? 'escrow_pending' as const : contract.status }
+        if (!backendConfig.hasBe2) throw new Error('BE2 URL is not configured')
+        const signed = await bluesafeApi.updateOperationalContractStatus(contract.id, contract.status === 'draft' ? 'escrow_pending' : contract.status)
         setApp((prev) => ({ ...prev, contract: signed }))
       })
     },
     landlordAcceptDispute: async () => {
       await run('BE2 임대인 환불 판정', async () => {
-        const currentDispute = app.dispute ?? {
-          id: 'dsp_demo_landlord_001',
-          contractId: app.contract?.id ?? 'ctr_demo_001',
-          raisedBy: 'tenant' as const,
-          reasonCode: 'UTILITY_OVER_AVERAGE',
-          status: 'under_review' as const,
-        }
-        const dispute = backendConfig.hasBe2 && app.dispute
-          ? await bluesafeApi.decideDispute(currentDispute.id, 'partial_manual', '임대인이 차액 6,000원 환불을 인정')
-          : { ...currentDispute, status: 'decided' as const, decision: 'partial_manual' }
+        if (!backendConfig.hasBe2) throw new Error('BE2 URL is not configured')
+        if (!app.dispute) throw new Error('No dispute exists in backend state')
+        const dispute = await bluesafeApi.decideDispute(app.dispute.id, 'partial_manual', 'Landlord accepted partial refund')
         setApp((prev) => ({ ...prev, dispute }))
       })
     },
@@ -312,48 +284,30 @@ function App() {
       await run('BE2 보증금 정산 승인', async () => {
         const contract = app.contract ?? await actions.createDraftContract()
         const settlement = app.settlements[0]
-        if (backendConfig.hasBe2 && settlement) {
-          const updated = await bluesafeApi.updateSettlementStatus(settlement.id, {
-            status: 'confirmed',
-            amountMinor: 14_950_000,
-            currencyCode: 'KRW',
-            batchId: `settlement-${contract.id}`,
-          })
-          setApp((prev) => ({ ...prev, settlements: [updated, ...prev.settlements.slice(1)] }))
-          return
-        }
-        setApp((prev) => ({
-          ...prev,
-          settlements: [{
-            id: 'set_demo_001',
-            contractId: contract.id,
-            status: 'confirmed',
-            amountMinor: 14_950_000,
-            currencyCode: 'KRW',
-          }],
-        }))
+        if (!backendConfig.hasBe2) throw new Error('BE2 URL is not configured')
+        if (!settlement) throw new Error('No settlement exists in backend state')
+        const updated = await bluesafeApi.updateSettlementStatus(settlement.id, {
+          status: 'confirmed',
+          amountMinor: settlement.amountMinor,
+          currencyCode: settlement.currencyCode,
+          batchId: `settlement-${contract.id}`,
+        })
+        setApp((prev) => ({ ...prev, settlements: [updated, ...prev.settlements.slice(1)] }))
       })
     },
     uploadEvidence: async (input) => {
       return run('BE2 증빙 업로드', async () => {
         const contract = app.contract ?? await actions.createDraftContract()
-        const evidence = backendConfig.hasBe2
-          ? await bluesafeApi.uploadEvidence({
-              contractId: contract.id,
-              category: input.category,
-              uploaderId: app.tenantId,
-              fileName: input.fileName,
-              file: input.file,
-              content: input.content,
-              retentionDays: 365,
-            })
-          : {
-              id: `ev_demo_${Date.now()}`,
-              contractId: contract.id,
-              category: input.category,
-              cid: `bafy-demo-${input.category}`,
-              version: 1,
-            }
+        if (!backendConfig.hasBe2) throw new Error('BE2 URL is not configured')
+        const evidence = await bluesafeApi.uploadEvidence({
+          contractId: contract.id,
+          category: input.category,
+          uploaderId: app.tenantId,
+          fileName: input.fileName,
+          file: input.file,
+          content: input.content,
+          retentionDays: 365,
+        })
         setApp((prev) => ({ ...prev, evidence }))
         return evidence
       })
@@ -367,20 +321,13 @@ function App() {
           file,
           content: 'August gas bill 31,000 KRW, average 25,000 KRW, suspected leak.',
         })
-        const dispute = backendConfig.hasBe2
-          ? await bluesafeApi.createDispute({
-              contractId: contract.id,
-              raisedBy: 'tenant',
-              reasonCode: 'UTILITY_OVER_AVERAGE',
-              evidenceIds: [evidence.id],
-            })
-          : {
-              id: 'dsp_demo_001',
-              contractId: contract.id,
-              raisedBy: 'tenant' as const,
-              reasonCode: 'UTILITY_OVER_AVERAGE',
-              status: 'under_review' as const,
-            }
+        if (!backendConfig.hasBe2) throw new Error('BE2 URL is not configured')
+        const dispute = await bluesafeApi.createDispute({
+          contractId: contract.id,
+          raisedBy: 'tenant',
+          reasonCode: 'UTILITY_OVER_AVERAGE',
+          evidenceIds: [evidence.id],
+        })
         setApp((prev) => ({ ...prev, evidence, dispute }))
       })
     },
@@ -388,9 +335,8 @@ function App() {
       const currentDispute = app.dispute
       if (!currentDispute) return
       await run('BE2 분쟁 판정 기록', async () => {
-        const dispute = backendConfig.hasBe2
-          ? await bluesafeApi.decideDispute(currentDispute.id, 'partial_manual', '평년 대비 초과분 6,000원 환불')
-          : { ...currentDispute, status: 'decided' as const, decision: 'partial_manual' }
+        if (!backendConfig.hasBe2) throw new Error('BE2 URL is not configured')
+        const dispute = await bluesafeApi.decideDispute(currentDispute.id, 'partial_manual', 'Dispute accepted')
         setApp((prev) => ({ ...prev, dispute }))
       })
     },
@@ -664,41 +610,47 @@ function T06Contract({ next, actions, busy, error }: NavProps) {
   )
 }
 
-function T07Pay({ next, actions, busy, error }: NavProps) {
+function T07Pay({ next, actions, busy, error, app }: NavProps) {
+  const hasTenantWallet = Boolean(app.tenantAddress)
+  const hasLandlordWallet = Boolean(app.landlordAddress)
+  const canRunEscrow = hasTenantWallet && hasLandlordWallet
   return (
     <Page>
-      <Hero eyebrow="XRPL" title="안전 송금 금액" />
-      <div className="amount-panel"><strong>15,000,000원</strong><Info label="XRPL Escrow 시세" value="1 XRP ≈ 850원" /><Info label="잠금 수량" value="17,647 XRP" /><Info label="수수료" value="0원 (BlueSafe 부담)" /></div>
-      <SectionTitle>결제 수단</SectionTitle>
-      <ListItem icon={<WalletIcon />} title="토스뱅크 입출금" desc="••• 8821" action="기본" />
-      <ListItem icon={<PlusIcon />} title="다른 계좌 추가" />
+      <Hero title="XRPL 에스크로 확인" desc="실제 지갑 주소와 백엔드 응답이 준비됐을 때만 실행해요" />
+      <div className="amount-panel">
+        <strong>{app.contract ? '계약 생성됨' : '계약 생성 전'}</strong>
+        <Info label="BE2 계약 ID" value={app.contract?.id ?? '아직 없음'} mono={Boolean(app.contract?.id)} />
+        <Info label="임차인 지갑" value={app.tenantAddress ? shortHash(app.tenantAddress) : '연결 필요'} mono={hasTenantWallet} />
+        <Info label="임대인 지갑" value={app.landlordAddress ? shortHash(app.landlordAddress) : '연결 필요'} mono={hasLandlordWallet} />
+      </div>
+      <SectionTitle>실행 조건</SectionTitle>
+      <ListItem icon={<WalletIcon />} title="내부 XRPL 지갑" desc={canRunEscrow ? '양쪽 주소가 준비됐어요' : '임차인과 임대인 지갑 주소가 모두 필요해요'} />
+      <ListItem icon={<LockIcon />} title="온체인 에스크로" desc="BE1 /contracts 응답이 있어야 완료 상태로 표시해요" />
       <BackendInline error={error} />
-      <BottomCTA label={busy ? '에스크로 생성 중' : '15,000,000원 안전 송금'} onClick={async () => { try { await actions.lockDeposit(); next() } catch { return } }} />
+      <BottomCTA label={busy ? '에스크로 생성 중' : 'XRPL 에스크로 생성'} onClick={async () => { try { await actions.lockDeposit(); next() } catch { return } }} />
     </Page>
   )
 }
 
 function T08Receipt({ next, app }: NavProps) {
-  const txHash = app.xrplContract?.depositEscrowTxHash ?? app.contract?.depositEscrowTxHash ?? 'F2A8…91D3'
-  const account = app.xrplContract?.contractAccountAddress ?? 'XRPL escrow account'
+  const txHash = app.xrplContract?.depositEscrowTxHash ?? app.contract?.depositEscrowTxHash
+  const account = app.xrplContract?.contractAccountAddress
   const [open, setOpen] = useState(false)
   return (
     <Page>
-      <Hero title="보증금이 잠겼어요" desc="2027년 5월 31일까지 안전하게 보관돼요" />
+      <Hero title="에스크로 결과" desc="BE1이 반환한 온체인 값만 표시해요" />
       <Card>
-        <Info label="안전 송금 금액" value={krw(deposit)} strong />
-        <Info label="계약 기간" value="2026.06.01–2027.05.31" />
-        <Info label="집" value="망원동 12-3, 302호" />
-        <Info label="집주인" value="김 ○ ○" />
-        <Info label="XRPL TX" value={shortHash(txHash)} mono />
-        <Info label="Escrow Account" value={account} mono />
+        <Info label="BE1 계약 ID" value={app.xrplContract?.id ?? '응답 없음'} mono={Boolean(app.xrplContract?.id)} />
+        <Info label="BE2 계약 ID" value={app.contract?.id ?? '응답 없음'} mono={Boolean(app.contract?.id)} />
+        <Info label="XRPL TX" value={txHash ? shortHash(txHash) : '응답 없음'} mono={Boolean(txHash)} />
+        <Info label="Escrow Account" value={account ?? '응답 없음'} mono={Boolean(account)} />
       </Card>
-      <button className="card blue action-card" onClick={() => setOpen(true)}><strong>온체인 영수증</strong><span>익스플로러로 보기 →</span></button>
+      <button className="card blue action-card" disabled={!txHash} onClick={() => setOpen(true)}><strong>온체인 영수증</strong><span>{txHash ? '실제 TX 확인' : '아직 생성되지 않음'}</span></button>
       <BottomCTA label="홈으로" secondary="공유" onClick={next} />
-      <ActionModal open={open} title="XRPL 트랜잭션" onClose={() => setOpen(false)} primaryLabel="닫기" onPrimary={() => setOpen(false)}>
-        <p>실서비스에서는 이 값으로 XRPL Explorer를 열면 돼요.</p>
-        <Info label="tx" value={txHash} mono />
-        <Info label="account" value={account} mono />
+      <ActionModal open={open} title="XRPL 영수증" onClose={() => setOpen(false)} primaryLabel="확인" onPrimary={() => setOpen(false)}>
+        <p>현재 백엔드에서 받은 실제 온체인 응답입니다.</p>
+        <Info label="tx" value={txHash ?? '없음'} mono={Boolean(txHash)} />
+        <Info label="account" value={account ?? '없음'} mono={Boolean(account)} />
       </ActionModal>
     </Page>
   )
@@ -706,6 +658,13 @@ function T08Receipt({ next, app }: NavProps) {
 
 function T09Home({ go, app, error }: NavProps) {
   const lease = getLeaseMetrics(app)
+  const hasContract = Boolean(app.contract || app.xrplContract)
+  const hasLeaseDates = Boolean(lease)
+  const statusLabel = app.xrplContract?.status ?? app.contract?.status ?? '연동 대기'
+  const txHash = app.xrplContract?.depositEscrowTxHash ?? app.contract?.depositEscrowTxHash
+  const progress = lease?.progress ?? 0
+  const daysLeft = lease?.daysLeft ?? 0
+  const livedDays = lease?.livedDays ?? 0
 
   return (
     <Page bottomNav>
@@ -713,27 +672,29 @@ function T09Home({ go, app, error }: NavProps) {
       <BackendStatus app={app} error={error} />
       <div className="home-summary">
         <div className="deposit-card">
-          <span>현재 보증금</span>
-          <strong>{won(deposit)}</strong>
-          <p>멀티시그로 안전하게 보관해요</p>
+          <span>현재 상태</span>
+          <strong>{statusLabel}</strong>
+          <p>{txHash ? 'XRPL 에스크로가 생성됐어요' : hasContract ? '계약은 생성됐고 에스크로 대기 중이에요' : '백엔드 계약 응답을 기다리고 있어요'}</p>
         </div>
         <div className="contract-card">
-          <div className="progress-ring" style={{ '--progress': `${lease.progress}%` } as CSSProperties} aria-label={`계약 만료까지 ${lease.daysLeft}일 남음`}>
-            <strong>{lease.daysLeft}</strong>
+          <div className="progress-ring" style={{ '--progress': (hasLeaseDates ? String(progress) : '0') + '%' } as CSSProperties} aria-label="계약 진행률">
+            <strong>{hasLeaseDates ? daysLeft : '-'}</strong>
             <span>일 남음</span>
           </div>
-          <p>계약 만료까지</p>
+          <p>{hasLeaseDates ? '계약 만료까지' : '날짜 응답 없음'}</p>
         </div>
         <div className="living-card">
           <span>거주</span>
-          <strong>{lease.livedDays}일차</strong>
+          <strong>{hasLeaseDates ? String(livedDays) + '일차' : '--'}</strong>
         </div>
         <div className="quick-grid"><button>리포트</button><button onClick={() => go('t13')}>공과금</button><button onClick={() => go('t10')}>반환</button><button>계약서</button></div>
       </div>
       <div className="home-tasks">
         <SectionTitle right="전체">오늘 할 일</SectionTitle>
-        <ListItem icon={<AlertIcon />} title="8월 가스비가 평소보다 12% 높아요" desc="확인 필요" onClick={() => go('t13')} />
-        <ListItem icon={<img src={reputationMascot} alt="" className="mini-asset" />} title="평판 기록이 시작됐어요" desc="한 방울 → 시내, 거주 60일 달성" />
+        {hasContract ? <>
+          <ListItem icon={<AlertIcon />} title="계약 상태 확인" desc={statusLabel} />
+          <ListItem icon={<img src={reputationMascot} alt="" className="mini-asset" />} title="XRPL 에스크로" desc={txHash ? shortHash(txHash) : '온체인 생성 전이에요'} />
+        </> : <Card tone="soft"><strong>아직 계약 데이터가 없어요</strong><span>임차인/임대인 지갑 연결 후 실제 백엔드 계약을 생성해 주세요.</span></Card>}
       </div>
       <div className="screen-fill" />
     </Page>
@@ -743,7 +704,12 @@ function T09Home({ go, app, error }: NavProps) {
 function T10Countdown({ app, actions }: NavProps) {
   const lease = getLeaseMetrics(app)
   const settlement = app.settlements[0]
+  const hasContract = Boolean(app.contract || app.xrplContract)
+  const hasLeaseDates = Boolean(lease)
   const didLoadSettlements = useRef(false)
+  const returnLeft = lease?.returnLeft
+  const progress = lease?.progress ?? 0
+  const finishAfter = lease?.finishAfter
 
   useEffect(() => {
     if (didLoadSettlements.current) return
@@ -753,20 +719,20 @@ function T10Countdown({ app, actions }: NavProps) {
 
   return (
     <Page>
-      <Hero title="자동 반환까지" desc="집주인이 응답하지 않아도 자동으로 풀려요" />
-      <div className="time-grid"><TimeBox value={pad2(lease.returnLeft.days)} label="일" /><TimeBox value={pad2(lease.returnLeft.hours)} label="시간" /><TimeBox value={pad2(lease.returnLeft.minutes)} label="분" /></div>
+      <Hero title="자동 반환까지" desc="계약 날짜와 정산 응답이 있을 때만 진행률을 계산해요" />
+      <div className="time-grid"><TimeBox value={returnLeft ? pad2(returnLeft.days) : '--'} label="일" /><TimeBox value={returnLeft ? pad2(returnLeft.hours) : '--'} label="시간" /><TimeBox value={returnLeft ? pad2(returnLeft.minutes) : '--'} label="분" /></div>
       <div className="return-progress">
-        <div className="return-progress-head"><span>반환 진행률</span><strong>{lease.progress}%</strong></div>
-        <div className="return-track"><span style={{ width: `${lease.progress}%` }} /><b className="safe-emoji" aria-label="돈">💰</b></div>
+        <div className="return-progress-head"><span>계약 진행률</span><strong>{hasLeaseDates ? String(progress) + '%' : '대기'}</strong></div>
+        <div className="return-track"><span style={{ width: (hasLeaseDates ? String(progress) : '0') + '%' }} /><b className="safe-emoji" aria-label="money">💸</b></div>
       </div>
-      <Card tone="blue"><strong>{settlement ? `정산 상태: ${settlement.status}` : '아무것도 안 해도 돼요'}</strong><span>{formatDate(lease.finishAfter)} 이후 보증금 15,000,000원이 자동 반환 대상이 돼요.</span></Card>
+      <Card tone="blue"><strong>{settlement ? '정산 상태: ' + settlement.status : hasContract ? '정산 응답 대기 중' : '계약 응답 없음'}</strong><span>{finishAfter ? formatDate(finishAfter) + ' 이후 반환 조건을 확인해요.' : '계약 날짜 또는 BE2 settlement 응답이 필요해요.'}</span></Card>
       <SectionTitle>진행 상황</SectionTitle>
-      <Timeline items={[
-        `계약 시작|${formatDate(lease.startsAt)}`,
-        `계약 만료|${formatDate(lease.endsAt)}`,
-        `자동 반환 대기|${lease.returnLeft.totalMs > 0 ? `${lease.returnLeft.days}일 남음` : '반환 조건 도달'}`,
-        `보증금 반환|${formatDate(lease.finishAfter)} (예상)`,
-      ]} />
+      <Timeline items={lease ? [
+        '계약 시작|' + formatDate(lease.startsAt),
+        '계약 만료|' + formatDate(lease.endsAt),
+        '자동 반환 대기|' + (lease.returnLeft.totalMs > 0 ? String(lease.returnLeft.days) + '일 남음' : '반환 조건 확인'),
+        '정산 응답|' + formatDate(lease.finishAfter) + ' 이후',
+      ] : ['계약 날짜|응답 없음', 'XRPL 에스크로|응답 없음', '정산 상태|응답 없음']} />
     </Page>
   )
 }
@@ -816,18 +782,25 @@ function T12Reputation({ next }: NavProps) {
   )
 }
 
-function T13Bills({ go }: NavProps) {
+function T13Bills({ go, app }: NavProps) {
+  const hasEvidence = Boolean(app.evidence)
+  const hasDispute = Boolean(app.dispute)
   return (
     <Page bottomNav>
-      <Hero title="8월 공과금" desc="평년 데이터와 자동으로 비교해요" />
-      <div className="total-bill"><span>청구 총액</span><strong>{krw(127_400)}</strong><p>평소 대비 +14,200원 (12.5%↑)</p></div>
-      <SectionTitle>항목별</SectionTitle>
-      <Bill title="전기" value={48_200} diff="+3.1%" />
-      <Bill title="가스" value={31_000} diff="+12.5%" warn />
-      <Bill title="수도" value={18_200} diff="−2.0%" />
-      <Bill title="인터넷" value={30_000} diff="0%" />
-      <Card tone="yellow"><strong>가스비가 평소보다 12% 높아요</strong><span>평년 데이터와 비교한 참고 정보예요.</span></Card>
-      <BottomCTA label="확인" secondary="나중에" onClick={() => go('t09')} />
+      <Hero title="공과금 확인" desc="목업 청구액 대신 BE2 증빙과 dispute 상태만 표시해요" />
+      <div className="total-bill">
+        <span>증빙 상태</span>
+        <strong>{hasEvidence ? '증빙 등록됨' : '증빙 없음'}</strong>
+        <p>{hasEvidence ? 'evidence: ' + app.evidence?.id : '아직 백엔드에 등록된 공과금 증빙이 없어요.'}</p>
+      </div>
+      <SectionTitle>연동 항목</SectionTitle>
+      <ListItem icon={<ReceiptIcon />} title="공과금 증빙" desc={hasEvidence ? app.evidence?.category ?? '카테고리 응답 없음' : '업로드된 증빙 없음'} action={hasEvidence ? '등록' : '대기'} />
+      <ListItem icon={<AlertIcon />} title="Dispute 상태" desc={hasDispute ? app.dispute?.reasonCode : 'BE2 dispute 응답 없음'} action={hasDispute ? app.dispute?.status : '대기'} />
+      <Card tone={hasEvidence || hasDispute ? 'blue' : 'soft'}>
+        <strong>{hasEvidence || hasDispute ? '백엔드 응답을 불러왔어요' : '실제 데이터가 필요해요'}</strong>
+        <span>청구액과 항목별 금액은 OCR 또는 BE2 API 응답이 생긴 뒤 표시하는 흐름이 맞아요.</span>
+      </Card>
+      <BottomCTA label={hasEvidence ? '확인' : '증빙 업로드로 이동'} secondary="나중에" onClick={() => go(hasEvidence ? 't09' : 't14')} />
     </Page>
   )
 }
@@ -839,23 +812,26 @@ function T14Dispute({ next, actions, busy, error }: NavProps) {
     if (!selected) return
     setFile(selected)
   }
+
   return (
     <Page>
-      <Hero title={'어떤 부분이\n이상한가요?'} />
-      <SectionTitle>대상</SectionTitle>
-      <ListItem icon={<AlertIcon />} title="8월 가스비" desc="₩31,000 · +12.5%" action="대상" />
-      <SectionTitle>이유</SectionTitle>
-      <div className="chip-wrap"><span className="chip selected">평년보다 너무 높아요</span><span className="chip">계량기 수치가 달라요</span><span className="chip">공용부 누수 의심</span><span className="chip">직접 입력</span></div>
-      <SectionTitle>근거 사진</SectionTitle>
+      <Hero title="공과금 증빙 업로드" desc="금액은 목업으로 넣지 않고, 실제 BE2 evidence 응답만 표시해요" />
+      <SectionTitle>증빙 파일</SectionTitle>
       <input className="hidden-input" id="utility-evidence-file" type="file" accept="image/png,image/jpeg,application/pdf" onChange={onFile} />
-      <div className="photo-grid evidence-grid"><div>{file ? file.name : ''}</div><div /><button onClick={() => document.getElementById('utility-evidence-file')?.click()}>+</button></div>
-      <SectionTitle>한 줄 설명</SectionTitle><div className="note-box">평소엔 25,000원 정도 나오는데 이번에 31,000원 나왔어요. 누수 가능성이 있어요.</div>
+      <div className="photo-grid evidence-grid">
+        <div>{file ? file.name : '선택된 파일 없음'}</div>
+        <div />
+        <button onClick={() => document.getElementById('utility-evidence-file')?.click()}>+</button>
+      </div>
+      <Card tone="soft">
+        <strong>업로드 후 표시되는 값</strong>
+        <span>BE2 evidence ID, category, CID가 응답으로 돌아오면 공과금 화면에 연결돼요.</span>
+      </Card>
       <BackendInline error={error} />
-      <BottomCTA label={busy ? '분쟁 접수 중' : '이의 제기 보내기'} onClick={async () => { try { await actions.createUtilityDispute(file); next() } catch { return } }} />
+      <BottomCTA label={busy ? '증빙 업로드 중' : '증빙 업로드'} secondary="취소" onClick={async () => { try { await actions.uploadEvidence({ category: 'utility_bill', fileName: file?.name ?? 'utility-bill', file, content: 'utility bill evidence uploaded from frontend' }); next() } catch { return } }} />
     </Page>
   )
 }
-
 function T15DisputeStatus({ app }: NavProps) {
   return (
     <Page>
@@ -1108,10 +1084,6 @@ function Checklist({ items }: { items: string[] }) {
   return <>{items.map((item) => <ListItem key={item} icon={<CheckIcon />} title={item} />)}</>
 }
 
-function Bill({ title, value, diff, warn = false }: { title: string; value: number; diff: string; warn?: boolean }) {
-  return <div className="bill"><span className={warn ? 'bill-icon warn' : 'bill-icon'}>{warn ? '!' : <CheckIcon />}</span><div><strong>{title}</strong><small>8월 청구</small></div><div className="bill-tail"><b>{krw(value)}</b><em className={warn ? 'warn' : ''}>{diff}</em></div></div>
-}
-
 function VaultDiagram() {
   return (
     <div className="onboarding-visual vault">
@@ -1184,17 +1156,17 @@ function ActivityRows({ rows }: { rows: string[][] }) {
 }
 
 function BackendStatus({ app, error }: { app: AppModel; error: string }) {
-  const status = app.contract?.status ?? 'draft'
-  const contractId = app.contract?.id ?? 'local draft'
-  const xrplId = app.xrplContract?.id ?? 'not locked'
+  const status = app.xrplContract?.status ?? app.contract?.status ?? '백엔드 응답 대기'
+  const contractLabel = app.contract?.id ? `BE2 ${app.contract.id}` : 'BE2 응답 없음'
+  const xrplLabel = app.xrplContract?.id ? `BE1 ${app.xrplContract.id}` : 'BE1 응답 없음'
 
   return (
     <div className="backend-status">
       <div>
-        <span>Backend flow</span>
+        <span>연동 상태</span>
         <strong>{status}</strong>
       </div>
-      <p>BE2 {contractId} · BE1 {xrplId}</p>
+      <p>{contractLabel} · {xrplLabel}</p>
       {error && <em>{error}</em>}
     </div>
   )
@@ -1275,19 +1247,10 @@ function shortHash(value: string) {
   return `${value.slice(0, 6)}…${value.slice(-4)}`
 }
 
-function demoLeaseDates() {
-  const now = new Date()
-  const startsAt = addDays(now, -83)
-  const endsAt = addDays(now, 282)
-  const finishAfter = addDays(endsAt, 7)
-  const cancelAfter = addDays(endsAt, 30)
-  return { startsAt, endsAt, finishAfter, cancelAfter }
-}
-
 function getLeaseMetrics(app: AppModel) {
-  const demo = demoLeaseDates()
-  const startsAt = parseDate(app.contract?.startsAt ?? app.xrplContract?.startsAt) ?? demo.startsAt
-  const endsAt = parseDate(app.contract?.endsAt ?? app.xrplContract?.endsAt) ?? demo.endsAt
+  const startsAt = parseDate(app.contract?.startsAt ?? app.xrplContract?.startsAt)
+  const endsAt = parseDate(app.contract?.endsAt ?? app.xrplContract?.endsAt)
+  if (!startsAt || !endsAt) return undefined
   const finishAfter = addDays(endsAt, 7)
   const now = new Date()
   const totalMs = Math.max(1, endsAt.getTime() - startsAt.getTime())
