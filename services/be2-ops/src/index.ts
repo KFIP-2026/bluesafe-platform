@@ -420,6 +420,10 @@ app.post(
     tenantId: parsed.data.tenantId,
     landlordId: parsed.data.landlordId,
     status: "draft",
+    depositAmount: parsed.data.depositAmount,
+    stakeAmount: parsed.data.stakeAmount,
+    startsAt: parsed.data.startsAt,
+    endsAt: parsed.data.endsAt,
     createdAt: now,
     updatedAt: now,
   });
@@ -429,7 +433,15 @@ app.post(
     entityId: id,
     action: "contract.created",
     actorId: "operator_local",
-    after: { tenantId: parsed.data.tenantId, landlordId: parsed.data.landlordId, status: "draft" },
+    after: {
+      tenantId: parsed.data.tenantId,
+      landlordId: parsed.data.landlordId,
+      status: "draft",
+      depositAmount: parsed.data.depositAmount,
+      stakeAmount: parsed.data.stakeAmount,
+      startsAt: parsed.data.startsAt,
+      endsAt: parsed.data.endsAt,
+    },
   });
   await emitEvent({
     eventType: "contract.created",

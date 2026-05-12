@@ -3,6 +3,10 @@ import { z } from "zod";
 export const createContractSchema = z.object({
   tenantId: z.string().min(1),
   landlordId: z.string().min(1),
+  depositAmount: z.string().regex(/^[0-9]+$/).optional(),
+  stakeAmount: z.string().regex(/^[0-9]+$/).optional(),
+  startsAt: z.string().datetime().optional(),
+  endsAt: z.string().datetime().optional(),
 });
 
 export const contractStatusValueSchema = z.enum([

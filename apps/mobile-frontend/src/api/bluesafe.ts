@@ -104,7 +104,14 @@ export const bluesafeApi = {
     return request<{ ok: boolean; service: string }> (be2Url, '/health')
   },
 
-  createOperationalContract(input: { tenantId: string; landlordId: string }) {
+  createOperationalContract(input: {
+    tenantId: string
+    landlordId: string
+    depositAmount?: string
+    stakeAmount?: string
+    startsAt?: string
+    endsAt?: string
+  }) {
     return request<BackendContract>(be2Url, '/v1/contracts', {
       method: 'POST',
       body: JSON.stringify(input),

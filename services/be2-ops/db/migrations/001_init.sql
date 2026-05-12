@@ -6,6 +6,10 @@ CREATE TABLE IF NOT EXISTS contracts (
   landlord_id TEXT NOT NULL,
   status TEXT NOT NULL,
   escrow_create_tx_hash TEXT,
+  deposit_amount TEXT,
+  stake_amount TEXT,
+  starts_at TIMESTAMPTZ,
+  ends_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL
 );

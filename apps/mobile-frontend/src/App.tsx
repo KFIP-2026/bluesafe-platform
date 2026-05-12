@@ -640,7 +640,9 @@ const walletScreen: ScreenDef = { id: 'wallet', label: { ko: '지갑 연결', en
 const allScreens = [...tenantScreens.slice(0, 2), walletScreen, ...tenantScreens.slice(2), ...landlordScreens]
 
 function getInitialScreen(): ScreenId {
-  const screen = new URLSearchParams(window.location.search).get('screen') as ScreenId | null
+  const params = new URLSearchParams(window.location.search)
+  if (params.get('reset') === '1') localStorage.removeItem(appStorageKey)
+  const screen = params.get('screen') as ScreenId | null
   return screen && allScreens.some((item) => item.id === screen) ? screen : 't01'
 }
 
@@ -773,7 +775,13 @@ function App() {
         const participants = getParticipantIds(app)
         if (!participants) throw new Error('Tenant and landlord identifiers are required')
         if (!isContractDraftReady(app.contractDraft)) throw new Error('Contract depositAmount, stakeAmount, startsAt and endsAt are required')
-        const contract = withContractDraft(await bluesafeApi.createOperationalContract(participants), app.contractDraft)
+        const contract = await bluesafeApi.createOperationalContract({
+          ...participants,
+          depositAmount: app.contractDraft.depositAmount,
+          stakeAmount: app.contractDraft.stakeAmount,
+          startsAt: new Date(app.contractDraft.startsAt).toISOString(),
+          endsAt: new Date(app.contractDraft.endsAt).toISOString(),
+        })
         setApp((prev) => ({ ...prev, contract }))
         return contract
       })

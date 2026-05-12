@@ -97,6 +97,7 @@ BE1:
 BE2:
 
 - `POST /v1/contracts`
+  - tenant/landlord id와 계약 금액/기간을 저장
 - `PATCH /v1/contracts/:contractId/status`
 - `PATCH /v1/contracts/:contractId/escrow-anchor`
 - `POST /v1/evidences`
