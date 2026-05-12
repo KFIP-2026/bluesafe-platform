@@ -157,7 +157,7 @@ function App() {
     tenantAddress: '',
     landlordAddress: '',
     settlements: [],
-    backendEvents: ['프론트 데모 상태로 시작했어요'],
+    backendEvents: [],
   })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -892,18 +892,33 @@ function T19Fx({ next }: NavProps) {
   )
 }
 
-function T20Activity({ next }: NavProps) {
-  const rows = [['2027 · 6월', '06.07', '본국 송금 완료', 'John Park · USA', '−₩14,956,000'], ['', '06.07', '보증금 반환', '망원동 12-3', '+₩15,000,000'], ['2026 · 9월', '09.08', '이의제기 환불', '8월 가스비', '+₩6,000'], ['', '09.04', '이의제기 접수', '진행 중 → 인정', ''], ['2026 · 6월', '06.01', '월세 납부', 'June', '−₩680,000'], ['', '06.01', '보증금 안전 송금', 'XRPL F2A8…91D3', '−₩15,000,000']]
+function T20Activity({ next, app }: NavProps) {
+  const rows: string[][] = []
+  const today = formatDate(new Date()).slice(5).replace('-', '.')
+
+  if (app.tenantAddress) rows.push(['실시간 상태', today, '임차인 지갑 생성', shortHash(app.tenantAddress), 'XRPL'])
+  if (app.landlordAddress) rows.push(['', today, '임대인 지갑 생성', shortHash(app.landlordAddress), 'XRPL'])
+  if (app.contract) rows.push(['', today, 'BE2 계약 응답', app.contract.id, app.contract.status])
+  if (app.xrplContract) rows.push(['', today, 'BE1 에스크로 응답', app.xrplContract.id, app.xrplContract.status])
+  if (app.xrplContract?.depositEscrowTxHash) rows.push(['', today, 'XRPL TX 생성', shortHash(app.xrplContract.depositEscrowTxHash), '온체인'])
+  if (app.evidence) rows.push(['', today, '증빙 업로드', app.evidence.id, app.evidence.category ?? 'evidence'])
+  if (app.dispute) rows.push(['', today, 'Dispute 상태', app.dispute.reasonCode, app.dispute.status])
+  app.settlements.forEach((settlement, index) => {
+    rows.push([index === 0 ? '정산 응답' : '', today, '정산 상태', settlement.id, settlement.status])
+  })
+  app.backendEvents.slice().reverse().forEach((event, index) => {
+    rows.push([index === 0 && rows.length === 0 ? '연동 로그' : '', today, event, '프론트 실행 기록', ''])
+  })
+
   return (
     <Page bottomNav>
-      <Hero title="활동 내역" />
-      <div className="chip-wrap compact"><span className="chip selected">전체</span><span className="chip">안전송금</span><span className="chip">월세</span><span className="chip">분쟁</span></div>
-      <ActivityRows rows={rows} />
+      <Hero title="활동 내역" desc="가짜 거래내역 대신 실제 연동 응답과 실행 로그만 보여요" />
+      <div className="chip-wrap compact"><span className="chip selected">전체</span><span className="chip">지갑</span><span className="chip">계약</span><span className="chip">증빙</span></div>
+      {rows.length > 0 ? <ActivityRows rows={rows} /> : <Card tone="soft"><strong>아직 활동 내역이 없어요</strong><span>지갑 생성, 계약 생성, 증빙 업로드가 성공하면 여기에 표시돼요.</span></Card>}
       <BottomCTA label="임대인 화면 보기" onClick={next} />
     </Page>
   )
 }
-
 function L01Invited({ next }: NavProps) {
   return (
     <Page>
