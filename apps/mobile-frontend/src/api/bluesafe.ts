@@ -45,15 +45,6 @@ type EvidenceUploadResponse = {
   retentionClass?: string
 }
 
-export type DisputeCase = {
-  id: string
-  contractId: string
-  status: 'filed' | 'under_review' | 'decided' | 'execution_pending' | 'executed' | 'closed' | 'rejected'
-  reasonCode: string
-  raisedBy: 'tenant' | 'landlord' | 'operator'
-  decision?: string
-}
-
 export type SettlementRecord = {
   id: string
   contractId: string
@@ -183,14 +174,12 @@ export const bluesafeApi = {
     fileName: string
     content?: string
     file?: Blob
-    disputeId?: string
     retentionDays?: number
   }) {
     const form = new FormData()
     form.set('contractId', input.contractId)
     form.set('category', input.category)
     form.set('uploaderId', input.uploaderId)
-    if (input.disputeId) form.set('disputeId', input.disputeId)
     if (input.retentionDays) form.set('retentionDays', String(input.retentionDays))
     const file = input.file ?? new Blob([input.content ?? ''], { type: 'text/plain' })
     form.set('file', file, input.fileName)
@@ -206,25 +195,6 @@ export const bluesafeApi = {
       version: evidence.version,
       createdAt: evidence.createdAt,
     }))
-  },
-
-  createDispute(input: {
-    contractId: string
-    raisedBy: 'tenant' | 'landlord' | 'operator'
-    reasonCode: string
-    evidenceIds: string[]
-  }) {
-    return request<DisputeCase>(be2Url, '/v1/disputes', {
-      method: 'POST',
-      body: JSON.stringify(input),
-    })
-  },
-
-  decideDispute(disputeId: string, decision: 'finish_to_tenant' | 'finish_to_landlord' | 'cancel_to_owner' | 'partial_manual', memo?: string) {
-    return request<DisputeCase>(be2Url, `/v1/disputes/${disputeId}/decision`, {
-      method: 'POST',
-      body: JSON.stringify({ decision, memo }),
-    })
   },
 
   trackTx(input: { txHash: string; txType: string; account?: string; network?: 'testnet' | 'mainnet' }) {

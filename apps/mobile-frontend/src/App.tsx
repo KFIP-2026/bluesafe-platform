@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties } from 'react'
 import './App.css'
-import { backendConfig, bluesafeApi, type BackendContract, type DisputeCase, type EvidenceFile, type SettlementRecord } from './api/bluesafe'
+import { backendConfig, bluesafeApi, type BackendContract, type EvidenceFile, type SettlementRecord } from './api/bluesafe'
 import { connectInternalWallet } from './api/internalWallet'
 import reputationMascot from './assets/reputation-mascot.png'
 
 type ScreenId =
   | 't01' | 'role' | 'wallet' | 't02' | 't03' | 't04' | 't05' | 't06' | 't07' | 't08' | 't09' | 't10'
-  | 't11' | 't12' | 't13' | 't14' | 't15' | 't16' | 't17' | 't18' | 't19' | 't20'
-  | 'l01' | 'l02' | 'l03' | 'l04' | 'l05' | 'l06' | 'l07' | 'l08' | 'l09' | 'l10'
+  | 't11' | 't12' | 't13' | 't14' | 't17' | 't18' | 't19' | 't20'
+  | 'l01' | 'l02' | 'l03' | 'l04' | 'l05' | 'l06' | 'l07' | 'l08' | 'l10'
   | 'l11' | 'l12'
 
 type ScreenDef = {
@@ -42,7 +42,6 @@ type AppModel = {
   contract?: BackendContract
   xrplContract?: BackendContract
   evidence?: EvidenceFile
-  dispute?: DisputeCase
   settlements: SettlementRecord[]
   backendEvents: string[]
 }
@@ -54,7 +53,6 @@ type AppActions = {
   lockDeposit: () => Promise<void>
   loadSettlements: () => Promise<void>
   landlordSignContract: () => Promise<void>
-  landlordAcceptDispute: () => Promise<void>
   landlordApproveSettlement: () => Promise<void>
   uploadEvidence: (input: {
     category: 'contract_pdf' | 'utility_bill' | 'photo' | 'receipt' | 'other'
@@ -62,8 +60,6 @@ type AppActions = {
     file?: Blob
     content?: string
   }) => Promise<EvidenceFile>
-  createUtilityDispute: (file?: File) => Promise<void>
-  acceptDispute: () => Promise<void>
 }
 
 const deposit = 15_000_000
@@ -84,9 +80,7 @@ const tenantScreens: ScreenDef[] = [
   { id: 't11', label: '안전 리포트', group: '임차인', component: T11Report },
   { id: 't12', label: '평판', group: '임차인', component: T12Reputation },
   { id: 't13', label: '공과금', group: '임차인', tab: 'tenant', component: T13Bills },
-  { id: 't14', label: '이의제기', group: '임차인', component: T14Dispute },
-  { id: 't15', label: '분쟁 진행', group: '임차인', component: T15DisputeStatus },
-  { id: 't16', label: '분쟁 결과', group: '임차인', component: T16DisputeResult },
+  { id: 't14', label: '증빙 업로드', group: '임차인', component: T14EvidenceUpload },
   { id: 't17', label: '퇴실 체크', group: '임차인', component: T17Moveout },
   { id: 't18', label: '반환 완료', group: '임차인', component: T18Returned },
   { id: 't19', label: '본국 송금', group: '임차인', component: T19Fx },
@@ -102,7 +96,6 @@ const landlordScreens: ScreenDef[] = [
   { id: 'l06', label: '임대인 홈', group: '임대인', tab: 'landlord', component: L06Home },
   { id: 'l07', label: '매물 상세', group: '임대인', component: L07Detail },
   { id: 'l08', label: '미납 자동 차감', group: '임대인', component: L08LateRent },
-  { id: 'l09', label: '분쟁 수신', group: '임대인', component: L09IncomingDispute },
   { id: 'l10', label: '수익 리포트', group: '임대인', tab: 'landlord', component: L10Earnings },
   { id: 'l11', label: '보증금 정산', group: '임대인', component: L11DepositRelease },
   { id: 'l12', label: '거래 내역', group: '임대인', tab: 'landlord', component: L12Activity },
@@ -250,14 +243,6 @@ function App() {
         setApp((prev) => ({ ...prev, contract: signed }))
       })
     },
-    landlordAcceptDispute: async () => {
-      await run('BE2 임대인 환불 판정', async () => {
-        if (!backendConfig.hasBe2) throw new Error('BE2 URL is not configured')
-        if (!app.dispute) throw new Error('No dispute exists in backend state')
-        const dispute = await bluesafeApi.decideDispute(app.dispute.id, 'partial_manual', 'Landlord accepted partial refund')
-        setApp((prev) => ({ ...prev, dispute }))
-      })
-    },
     landlordApproveSettlement: async () => {
       await run('BE2 보증금 정산 승인', async () => {
         const contract = app.contract ?? await actions.createDraftContract()
@@ -288,34 +273,6 @@ function App() {
         })
         setApp((prev) => ({ ...prev, evidence }))
         return evidence
-      })
-    },
-    createUtilityDispute: async (file?: File) => {
-      await run('BE2 증빙 업로드 + 분쟁 접수', async () => {
-        const contract = app.contract ?? await actions.createDraftContract()
-        const evidence = await actions.uploadEvidence({
-          category: 'utility_bill',
-          fileName: file?.name ?? 'august-gas-bill.txt',
-          file,
-          content: 'August gas bill 31,000 KRW, average 25,000 KRW, suspected leak.',
-        })
-        if (!backendConfig.hasBe2) throw new Error('BE2 URL is not configured')
-        const dispute = await bluesafeApi.createDispute({
-          contractId: contract.id,
-          raisedBy: 'tenant',
-          reasonCode: 'UTILITY_OVER_AVERAGE',
-          evidenceIds: [evidence.id],
-        })
-        setApp((prev) => ({ ...prev, evidence, dispute }))
-      })
-    },
-    acceptDispute: async () => {
-      const currentDispute = app.dispute
-      if (!currentDispute) return
-      await run('BE2 분쟁 판정 기록', async () => {
-        if (!backendConfig.hasBe2) throw new Error('BE2 URL is not configured')
-        const dispute = await bluesafeApi.decideDispute(currentDispute.id, 'partial_manual', 'Dispute accepted')
-        setApp((prev) => ({ ...prev, dispute }))
       })
     },
   }
@@ -454,7 +411,7 @@ function T02Onboarding({ next }: NavProps) {
     {
       eyebrow: '03 · BILLS',
       title: '공과금을\n자동으로 비교해요',
-      desc: '평년보다 높은 청구는\n근거와 함께 이의제기할 수 있어요.',
+      desc: '평년보다 높은 청구는\n근거 자료로 기록해둘 수 있어요.',
       visual: <ExamplePanel kind="bills" />,
     },
     {
@@ -577,7 +534,7 @@ function T06Contract({ next, actions, busy, error }: NavProps) {
       <SectionTitle>안심 조항 3가지</SectionTitle>
       <ListItem icon="§1" title="보증금은 XRPL 에스크로에 잠겨요" desc="계약 기간엔 양쪽 모두 못 꺼내요" />
       <ListItem icon="§2" title="퇴실 후 7일 이내 자동 반환돼요" desc="집주인 응답이 없어도 풀려요" />
-      <ListItem icon="§3" title="분쟁 시 BlueSafe 패널이 판정해요" desc="평균 처리 4.2일" />
+      <ListItem icon="§3" title="퇴실 후 자동 반환 절차가 시작돼요" desc="계약 조건에 따라 반환돼요" />
       <label className="agree-row"><input type="checkbox" defaultChecked /> 전체 약관에 동의해요</label>
       <BackendInline error={error} />
       <BottomCTA label={busy ? '계약 저장 중' : '서명하고 계속'} onClick={signContract} />
@@ -732,11 +689,10 @@ function T11Report() {
 function T12Reputation({ next, app }: NavProps) {
   const hasContract = Boolean(app.contract || app.xrplContract)
   const hasEvidence = Boolean(app.evidence)
-  const hasDispute = Boolean(app.dispute)
 
   return (
     <Page>
-      <Hero title="평판 데이터" desc="목업 등급 대신 실제 계약·증빙·분쟁 응답으로 계산할 준비만 해두었어요" />
+      <Hero title="평판 데이터" desc="목업 등급 대신 실제 계약·증빙 응답으로 계산할 준비만 해두었어요" />
       <Card tone="soft">
         <strong>아직 평판 등급이 없어요</strong>
         <span>점수와 등급은 백엔드 평판 계산 API가 붙은 뒤에만 표시해요.</span>
@@ -745,17 +701,15 @@ function T12Reputation({ next, app }: NavProps) {
       <ListItem icon={<ReceiptIcon />} title="계약 이력" desc={hasContract ? '계약 응답이 있어요' : 'BE2 계약 응답 없음'} action={hasContract ? '확인' : '대기'} />
       <ListItem icon={<ShieldIcon />} title="에스크로 이력" desc={app.xrplContract ? 'BE1 에스크로 응답이 있어요' : 'BE1 에스크로 응답 없음'} action={app.xrplContract ? '확인' : '대기'} />
       <ListItem icon={<CheckIcon />} title="증빙 이력" desc={hasEvidence ? '증빙이 연결됐어요' : '증빙 없음'} action={hasEvidence ? '확인' : '대기'} />
-      <ListItem icon={<AlertIcon />} title="분쟁 이력" desc={hasDispute ? app.dispute?.status ?? '분쟁 응답 있음' : '분쟁 응답 없음'} action={hasDispute ? '확인' : '없음'} />
       <BottomCTA label="홈으로" secondary="공유 준비 중" onClick={next} />
     </Page>
   )
 }
 function T13Bills({ go, app }: NavProps) {
   const hasEvidence = Boolean(app.evidence)
-  const hasDispute = Boolean(app.dispute)
   return (
     <Page bottomNav>
-      <Hero title="공과금 확인" desc="목업 청구액 대신 BE2 증빙과 dispute 상태만 표시해요" />
+      <Hero title="공과금 확인" desc="공과금은 증빙 업로드와 BE2 evidence 응답만 표시해요" />
       <div className="total-bill">
         <span>증빙 상태</span>
         <strong>{hasEvidence ? '증빙 등록됨' : '증빙 없음'}</strong>
@@ -763,17 +717,16 @@ function T13Bills({ go, app }: NavProps) {
       </div>
       <SectionTitle>연동 항목</SectionTitle>
       <ListItem icon={<ReceiptIcon />} title="공과금 증빙" desc={hasEvidence ? app.evidence?.category ?? '카테고리 응답 없음' : '업로드된 증빙 없음'} action={hasEvidence ? '등록' : '대기'} />
-      <ListItem icon={<AlertIcon />} title="Dispute 상태" desc={hasDispute ? app.dispute?.reasonCode : 'BE2 dispute 응답 없음'} action={hasDispute ? app.dispute?.status : '대기'} />
-      <Card tone={hasEvidence || hasDispute ? 'blue' : 'soft'}>
-        <strong>{hasEvidence || hasDispute ? '백엔드 응답을 불러왔어요' : '실제 데이터가 필요해요'}</strong>
-        <span>청구액과 항목별 금액은 OCR 또는 BE2 API 응답이 생긴 뒤 표시하는 흐름이 맞아요.</span>
+      <Card tone={hasEvidence ? 'blue' : 'soft'}>
+        <strong>{hasEvidence ? '백엔드 응답을 불러왔어요' : '실제 증빙이 필요해요'}</strong>
+        <span>청구액과 항목별 금액은 OCR 또는 BE2 evidence API 응답이 생긴 뒤 표시하는 흐름으로 두었어요.</span>
       </Card>
       <BottomCTA label={hasEvidence ? '확인' : '증빙 업로드로 이동'} secondary="나중에" onClick={() => go(hasEvidence ? 't09' : 't14')} />
     </Page>
   )
 }
 
-function T14Dispute({ next, actions, busy, error }: NavProps) {
+function T14EvidenceUpload({ next, actions, busy, error }: NavProps) {
   const [file, setFile] = useState<File>()
   const onFile = (event: ChangeEvent<HTMLInputElement>) => {
     const selected = event.target.files?.[0]
@@ -800,30 +753,6 @@ function T14Dispute({ next, actions, busy, error }: NavProps) {
     </Page>
   )
 }
-function T15DisputeStatus({ app }: NavProps) {
-  return (
-    <Page>
-      <Hero eyebrow="진행 중" title={'분쟁이\n진행 중이에요'} desc="평균 4.2일 안에 결과가 나와요" />
-      <StepperHeader current={1} />
-      <BackendInline label={`BE2 dispute: ${app.dispute?.id ?? 'not submitted yet'} · ${app.dispute?.status ?? 'local'}`} />
-      <Timeline items={['이의 제기 접수|09.04 · 14:32', '집주인에게 알림|09.04 · 14:32', 'BlueSafe 패널 검토 중|진행 중', '판정 + 환불|예상 09.08']} />
-      <Card tone="blue"><strong>걱정하지 마세요</strong><span>결과가 나올 때까지 차액(6,000원)이 자동으로 보류돼요. 부담 없이 기다려요.</span></Card>
-    </Page>
-  )
-}
-
-function T16DisputeResult({ next, actions, busy, error }: NavProps) {
-  return (
-    <Page>
-      <Hero title={'이의 제기가\n인정됐어요'} desc="환불이 토스 계좌에 들어왔어요" />
-      <Card><Info label="환불 금액" value={krw(6_000)} strong /><Info label="판정" value="임차인 인정" /><Info label="근거" value="계량기 수치 + 평년 비교" /><Info label="입금 시점" value="오늘 16:18" /></Card>
-      <Card tone="soft"><span>“계량기 수치를 비교한 결과 평년 대비 12% 초과 사용이 확인되지 않았어요. 차액 6,000원을 임차인에게 돌려드려요.” — BlueSafe Panel</span></Card>
-      <BackendInline error={error} />
-      <BottomCTA label={busy ? '판정 기록 중' : '확인'} onClick={async () => { try { await actions.acceptDispute(); next() } catch { return } }} />
-    </Page>
-  )
-}
-
 function T17Moveout({ next }: NavProps) {
   return (
     <Page>
@@ -832,7 +761,7 @@ function T17Moveout({ next }: NavProps) {
       <ListItem icon={<CheckIcon />} title="공과금 정산" desc="8월분까지 완료" action="완료" />
       <ListItem icon={<CheckIcon />} title="열쇠 반납 확인" desc="카카오톡 답변 받음" action="완료" />
       <ListItem icon="4" title="집주인 최종 확인 요청" desc="아직" action="필요" />
-      <Card tone="blue"><strong>체크 끝나면 어떻게 돼요?</strong><span>집주인이 7일 동안 이의제기를 안 하면 자동으로 보증금이 풀려요.</span></Card>
+      <Card tone="blue"><strong>체크 끝나면 어떻게 돼요?</strong><span>퇴실 체크와 정산 확인이 끝나면 보증금 반환 절차가 시작돼요.</span></Card>
       <BottomCTA label="집주인 확인 요청" onClick={next} />
     </Page>
   )
@@ -842,7 +771,7 @@ function T18Returned({ next }: NavProps) {
   return (
     <Page>
       <div className="success-block"><div className="success-icon"><CheckIcon /></div><h1>보증금이 돌아왔어요</h1><strong className="big-money">{krw(deposit)}</strong><p>토스뱅크 ••• 8821로 입금됐어요</p></div>
-      <Card><p className="doc-label">SETTLEMENT</p><Info label="원래 보증금" value={krw(deposit)} /><Info label="이의제기 환불" value={`+${krw(6_000)}`} /><Info label="청소 차감" value={`−${krw(50_000)}`} /><Info label="최종 입금" value={krw(14_956_000)} strong /></Card>
+      <Card><p className="doc-label">SETTLEMENT</p><Info label="원래 보증금" value={krw(deposit)} /><Info label="청소 차감" value={`−${krw(50_000)}`} /><Info label="최종 입금" value={krw(14_950_000)} strong /></Card>
       <BottomCTA label="본국으로 송금" secondary="영수증" onClick={next} />
     </Page>
   )
@@ -852,7 +781,7 @@ function T19Fx({ next }: NavProps) {
   return (
     <Page>
       <Hero eyebrow="저렴한 환율" title={'본국으로\n송금하기'} />
-      <Card tone="soft"><Info label="보낼 금액" value={krw(14_956_000)} strong /><Info label="받는 금액 (USD)" value="$11,150.45" strong /><p className="notice inside">1 USD = 1,341.30 KRW · XRPL 브릿지 사용</p></Card>
+      <Card tone="soft"><Info label="보낼 금액" value={krw(14_950_000)} strong /><Info label="받는 금액 (USD)" value="$11,145.98" strong /><p className="notice inside">1 USD = 1,341.30 KRW · XRPL 브릿지 사용</p></Card>
       <SectionTitle>받는 사람</SectionTitle><ListItem icon={<UserIcon />} title="John Park" desc="Bank of America · ••• 4421" action="USA" /><ListItem icon={<PlusIcon />} title="다른 받는 사람 추가" />
       <Card tone="blue"><strong>시중 은행 대비 절약</strong><span>+ ₩42,300</span></Card>
       <BottomCTA label="확인하고 송금" onClick={next} />
@@ -870,7 +799,6 @@ function T20Activity({ next, app }: NavProps) {
   if (app.xrplContract) rows.push(['', today, 'BE1 에스크로 응답', app.xrplContract.id, app.xrplContract.status])
   if (app.xrplContract?.depositEscrowTxHash) rows.push(['', today, 'XRPL TX 생성', shortHash(app.xrplContract.depositEscrowTxHash), '온체인'])
   if (app.evidence) rows.push(['', today, '증빙 업로드', app.evidence.id, app.evidence.category ?? 'evidence'])
-  if (app.dispute) rows.push(['', today, 'Dispute 상태', app.dispute.reasonCode, app.dispute.status])
   app.settlements.forEach((settlement, index) => {
     rows.push([index === 0 ? '정산 응답' : '', today, '정산 상태', settlement.id, settlement.status])
   })
@@ -967,19 +895,6 @@ function L08LateRent({ next }: NavProps) {
   return <Page><Hero title={'미납이지만\n돈은 들어왔어요'} desc="먼저 보증금에서 우선 차감해 송금했어요" /><Card tone="yellow"><span>미납 임차인</span><strong>Diego Ramirez</strong><span>망원동 12-3 #201 · 1일 지연</span></Card><Card><Info label="월세 자동 차감 완료" value="₩680,000" strong /><Info label="잠금 잔액" value="₩14,320,000" /><Info label="입금 시각" value="오늘 09:01" /></Card><p className="notice">임차인이 7일 안에 갚으면 잠금 잔액이 원복돼요. 그동안 BlueSafe가 알림과 추심을 진행해요.</p><BottomCTA label="확인" secondary="연락하기" onClick={next} /></Page>
 }
 
-function L09IncomingDispute({ next, actions, busy, error }: NavProps) {
-  const [open, setOpen] = useState(false)
-  const accept = async () => {
-    try {
-      await actions.landlordAcceptDispute()
-      setOpen(true)
-    } catch {
-      return
-    }
-  }
-  return <Page><Hero eyebrow="응답 필요" title={'임차인이\n이의 제기를 했어요'} desc="4일 안에 답하지 않으면 BlueSafe 패널이 판정해요" /><Card tone="yellow"><strong>대상 청구 · 8월 가스비</strong><span>₩31,000 · +12.5% vs avg</span></Card><Card tone="soft"><strong>임차인 주장</strong><span>“평소엔 25,000원 정도 나오는데 이번에 31,000원 나왔어요. 누수 가능성이 있어요.”</span></Card><SectionTitle>어떻게 할까요?</SectionTitle><ListItem icon={<CheckIcon />} title="인정하고 차액 환불" desc="6,000원이 즉시 임차인에게" /><ListItem icon={<ReceiptIcon />} title="근거 제출하고 반박" desc="검침지·계약서 등 첨부" /><ListItem icon={<ShieldIcon />} title="BlueSafe 패널에 위임" desc="평균 4.2일 소요" /><BackendInline error={error} /><BottomCTA label={busy ? '환불 기록 중' : '인정하고 환불'} onClick={accept} /><ActionModal open={open} title="환불 인정 완료" onClose={() => setOpen(false)} primaryLabel="계속" onPrimary={next}><p>BE2 dispute decision을 기록했어요. 실제 분쟁 ID가 있을 때는 해당 케이스에 판정이 연결됩니다.</p></ActionModal></Page>
-}
-
 function L10Earnings({ next }: NavProps) {
   const bars = [42, 48, 52, 58, 64, 72, 78, 86, 74, 68, 61, 55]
   return (
@@ -1015,7 +930,7 @@ function L11DepositRelease({ next, actions, busy, error }: NavProps) {
 }
 
 function L12Activity() {
-  const rows = [['2026 · 8월', '08.01', '월세 정산 — Sarah K', '#302', '+₩680,000'], ['', '08.02', '월세 자동 차감 — Diego R', '보증금에서', '+₩680,000'], ['', '08.04', '이의 환불 — Sarah K', '8월 가스', '−₩6,000'], ['2026 · 7월', '07.01', '월세 정산 — Sarah K', '#302', '+₩680,000'], ['', '07.01', '월세 정산 — Diego R', '#201', '+₩680,000']]
+  const rows = [['2026 · 8월', '08.01', '월세 정산 — Sarah K', '#302', '+₩680,000'], ['', '08.02', '월세 자동 차감 — Diego R', '보증금에서', '+₩680,000'], ['2026 · 7월', '07.01', '월세 정산 — Sarah K', '#302', '+₩680,000'], ['', '07.01', '월세 정산 — Diego R', '#201', '+₩680,000']]
   return <Page bottomNav><Hero title="거래 내역" /><div className="chip-wrap compact"><span className="chip selected">전체</span><span className="chip">월세</span><span className="chip">보증금</span><span className="chip">차감</span></div><ActivityRows rows={rows} /><BottomSpace /></Page>
 }
 
