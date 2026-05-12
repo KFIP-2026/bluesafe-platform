@@ -28,6 +28,7 @@ type NavProps = {
   busy: boolean
   error: string
   lang: Lang
+  setLang: (lang: Lang) => void
 }
 
 type AppModel = {
@@ -66,6 +67,10 @@ const ko = {
   history: '내역',
   contract: '계약',
   profile: '내정보',
+  settings: '설정',
+  language: '언어',
+  korean: '한국어',
+  english: 'English',
   revenue: '수익',
   all: '전체',
   waiting: '대기 중',
@@ -315,6 +320,10 @@ const en: typeof ko = {
   history: 'History',
   contract: 'Contract',
   profile: 'Profile',
+  settings: 'Settings',
+  language: 'Language',
+  korean: 'Korean',
+  english: 'English',
   revenue: 'Revenue',
   all: 'All',
   waiting: 'Waiting',
@@ -757,10 +766,9 @@ function App() {
     <main className="app-shell">
       <section className="phone">
         <StatusBar />
-        <LangToggle lang={lang} onChange={setLanguage} />
         <div className={screenId === 't01' ? 'viewport is-entry' : 'viewport'}>
           {showTopBar && <TopBar title={current.label[lang]} onBack={back} />}
-          <CurrentScreen key={screenId} next={next} go={go} app={app} actions={actions} busy={busy} error={error} lang={lang} />
+          <CurrentScreen key={screenId} next={next} go={go} app={app} actions={actions} busy={busy} error={error} lang={lang} setLang={setLanguage} />
         </div>
         {current.tab === 'tenant' && <TenantNav active={screenId} go={go} lang={lang} />}
         {current.tab === 'landlord' && <LandlordNav active={screenId} go={go} lang={lang} />}
@@ -973,10 +981,10 @@ function T11Report({ app, lang }: NavProps) {
   return <Page><Hero title={c.reportTitle} desc={c.reportDesc} /><Card tone="soft"><strong>{c.noScore}</strong><span>{c.noScoreDesc}</span></Card><SectionTitle>{c.signals}</SectionTitle><ListItem icon={<ReceiptIcon />} title={c.contract} desc={hasContract ? statusText(app.contract?.status ?? app.xrplContract?.status, lang) : c.responseNone} action={hasContract ? c.complete : c.waiting} /><ListItem icon={<WalletIcon />} title={c.settlement} desc={hasSettlement ? statusText(app.settlements[0]?.status, lang) : c.responseNone} action={hasSettlement ? c.complete : c.waiting} /></Page>
 }
 
-function T12Reputation({ go, app, lang }: NavProps) {
+function T12Reputation({ go, app, lang, setLang }: NavProps) {
   const c = copy[lang]
   const hasContract = Boolean(app.contract || app.xrplContract)
-  return <Page><Hero title={c.reputationTitle} desc={c.reputationDesc} /><Card tone="soft"><strong>{c.noGrade}</strong><span>{c.noGradeDesc}</span></Card><SectionTitle>{c.requiredSignals}</SectionTitle><ListItem icon={<ReceiptIcon />} title={c.contractHistory} desc={hasContract ? c.be2ContractResponse : c.responseNone} action={hasContract ? c.complete : c.waiting} /><ListItem icon={<ShieldIcon />} title={c.escrowHistory} desc={app.xrplContract ? c.be1EscrowResponse : c.responseNone} action={app.xrplContract ? c.complete : c.waiting} /><BottomCTA label={c.home} secondary={c.share} onClick={() => go('t09')} /></Page>
+  return <Page><Hero title={c.profile} desc={c.reputationDesc} /><Card tone="soft"><strong>{c.noGrade}</strong><span>{c.noGradeDesc}</span></Card><SectionTitle>{c.settings}</SectionTitle><Card tone="soft"><div className="setting-row"><div><strong>{c.language}</strong><span>{lang === 'ko' ? c.korean : c.english}</span></div><LanguageSegment lang={lang} onChange={setLang} /></div></Card><SectionTitle>{c.requiredSignals}</SectionTitle><ListItem icon={<ReceiptIcon />} title={c.contractHistory} desc={hasContract ? c.be2ContractResponse : c.responseNone} action={hasContract ? c.complete : c.waiting} /><ListItem icon={<ShieldIcon />} title={c.escrowHistory} desc={app.xrplContract ? c.be1EscrowResponse : c.responseNone} action={app.xrplContract ? c.complete : c.waiting} /><BottomCTA label={c.home} secondary={c.share} onClick={() => go('t09')} /></Page>
 }
 
 function T13Bills({ go, lang }: NavProps) {
@@ -1076,8 +1084,8 @@ function Page({ children, bottomNav = false }: { children: ReactNode; bottomNav?
   return <section className={bottomNav ? 'page has-bottom-nav' : 'page'}>{children}</section>
 }
 
-function LangToggle({ lang, onChange }: { lang: Lang; onChange: (lang: Lang) => void }) {
-  return <div className="lang-toggle" aria-label="Language"><button className={lang === 'ko' ? 'active' : ''} onClick={() => onChange('ko')}>KO</button><button className={lang === 'en' ? 'active' : ''} onClick={() => onChange('en')}>EN</button></div>
+function LanguageSegment({ lang, onChange }: { lang: Lang; onChange: (lang: Lang) => void }) {
+  return <div className="language-segment" aria-label="Language"><button className={lang === 'ko' ? 'active' : ''} onClick={() => onChange('ko')}>KO</button><button className={lang === 'en' ? 'active' : ''} onClick={() => onChange('en')}>EN</button></div>
 }
 
 function Hero({ title, desc }: { title: string; desc?: string }) {
