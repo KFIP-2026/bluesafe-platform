@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties } from 'react'
 import './App.css'
-import { backendConfig, bluesafeApi, type BackendContract, type EvidenceFile, type SettlementRecord } from './api/bluesafe'
+import { backendConfig, bluesafeApi, type BackendContract, type SettlementRecord } from './api/bluesafe'
 import { connectInternalWallet } from './api/internalWallet'
 import reputationMascot from './assets/reputation-mascot.png'
 
 type ScreenId =
   | 't01' | 'role' | 'wallet' | 't02' | 't03' | 't04' | 't05' | 't06' | 't07' | 't08' | 't09' | 't10'
-  | 't11' | 't12' | 't13' | 't14' | 't17' | 't18' | 't19' | 't20'
+  | 't11' | 't12' | 't13' | 't17' | 't18' | 't19' | 't20'
   | 'l01' | 'l02' | 'l03' | 'l04' | 'l05' | 'l06' | 'l07' | 'l08' | 'l10'
   | 'l11' | 'l12'
 
@@ -41,7 +41,6 @@ type AppModel = {
   landlordAddress: string
   contract?: BackendContract
   xrplContract?: BackendContract
-  evidence?: EvidenceFile
   settlements: SettlementRecord[]
   backendEvents: string[]
 }
@@ -54,12 +53,6 @@ type AppActions = {
   loadSettlements: () => Promise<void>
   landlordSignContract: () => Promise<void>
   landlordApproveSettlement: () => Promise<void>
-  uploadEvidence: (input: {
-    category: 'contract_pdf' | 'utility_bill' | 'photo' | 'receipt' | 'other'
-    fileName: string
-    file?: Blob
-    content?: string
-  }) => Promise<EvidenceFile>
 }
 
 const tenantScreens: ScreenDef[] = [
@@ -77,7 +70,6 @@ const tenantScreens: ScreenDef[] = [
   { id: 't11', label: '안전 리포트', group: '임차인', component: T11Report },
   { id: 't12', label: '평판', group: '임차인', component: T12Reputation },
   { id: 't13', label: '공과금', group: '임차인', tab: 'tenant', component: T13Bills },
-  { id: 't14', label: '증빙 업로드', group: '임차인', component: T14EvidenceUpload },
   { id: 't17', label: '퇴실 체크', group: '임차인', component: T17Moveout },
   { id: 't18', label: '반환 완료', group: '임차인', component: T18Returned },
   { id: 't19', label: '본국 송금', group: '임차인', component: T19Fx },
@@ -259,23 +251,6 @@ function App() {
           batchId: `settlement-${contract.id}`,
         })
         setApp((prev) => ({ ...prev, settlements: [updated, ...prev.settlements.slice(1)] }))
-      })
-    },
-    uploadEvidence: async (input) => {
-      return run('BE2 증빙 업로드', async () => {
-        const contract = app.contract ?? await actions.createDraftContract()
-        if (!backendConfig.hasBe2) throw new Error('BE2 URL is not configured')
-        const evidence = await bluesafeApi.uploadEvidence({
-          contractId: contract.id,
-          category: input.category,
-          uploaderId: app.tenantId,
-          fileName: input.fileName,
-          file: input.file,
-          content: input.content,
-          retentionDays: 365,
-        })
-        setApp((prev) => ({ ...prev, evidence }))
-        return evidence
       })
     },
   }
@@ -649,32 +624,19 @@ function T10Countdown({ app, actions }: NavProps) {
 
 function T11Report({ app }: NavProps) {
   const hasContract = Boolean(app.contract || app.xrplContract)
-  const hasEvidence = Boolean(app.evidence)
   const hasSettlement = app.settlements.length > 0
-  return <Page><Hero title="Safety report" desc="No fixed score is shown. Only live backend signals are listed." /><Card tone="soft"><strong>No report score yet</strong><span>A backend scoring API is required before score and delta can be displayed.</span></Card><SectionTitle>Signals</SectionTitle><ListItem icon={<ReceiptIcon />} title="Contract" desc={hasContract ? app.contract?.status ?? app.xrplContract?.status ?? 'Response exists' : 'No response'} action={hasContract ? 'OK' : 'Waiting'} /><ListItem icon={<CheckIcon />} title="Evidence" desc={hasEvidence ? app.evidence?.id ?? 'Response exists' : 'No response'} action={hasEvidence ? 'OK' : 'Waiting'} /><ListItem icon={<WalletIcon />} title="Settlement" desc={hasSettlement ? app.settlements[0]?.status ?? 'Response exists' : 'No response'} action={hasSettlement ? 'OK' : 'Waiting'} /></Page>
+  return <Page><Hero title="Safety report" desc="Only live contract and settlement signals are listed." /><Card tone="soft"><strong>No report score yet</strong><span>A backend scoring API is required before score and delta can be displayed.</span></Card><SectionTitle>Signals</SectionTitle><ListItem icon={<ReceiptIcon />} title="Contract" desc={hasContract ? app.contract?.status ?? app.xrplContract?.status ?? 'Response exists' : 'No response'} action={hasContract ? 'OK' : 'Waiting'} /><ListItem icon={<WalletIcon />} title="Settlement" desc={hasSettlement ? app.settlements[0]?.status ?? 'Response exists' : 'No response'} action={hasSettlement ? 'OK' : 'Waiting'} /></Page>
 }
 function T12Reputation({ next, app }: NavProps) {
   const hasContract = Boolean(app.contract || app.xrplContract)
-  const hasEvidence = Boolean(app.evidence)
-  return <Page><Hero title="Reputation data" desc="No fixed grade is shown. Backend reputation scoring is required." /><Card tone="soft"><strong>No reputation grade yet</strong><span>Score and grade will appear only after the backend scoring API is connected.</span></Card><SectionTitle>Required signals</SectionTitle><ListItem icon={<ReceiptIcon />} title="Contract history" desc={hasContract ? 'Contract response exists' : 'No BE2 contract response'} action={hasContract ? 'OK' : 'Waiting'} /><ListItem icon={<ShieldIcon />} title="Escrow history" desc={app.xrplContract ? 'BE1 escrow response exists' : 'No BE1 escrow response'} action={app.xrplContract ? 'OK' : 'Waiting'} /><ListItem icon={<CheckIcon />} title="Evidence history" desc={hasEvidence ? 'Evidence connected' : 'No evidence'} action={hasEvidence ? 'OK' : 'Waiting'} /><BottomCTA label="Home" secondary="Share disabled" onClick={next} /></Page>
+  return <Page><Hero title="Reputation data" desc="Backend reputation scoring is required." /><Card tone="soft"><strong>No reputation grade yet</strong><span>Score and grade will appear only after the backend scoring API is connected.</span></Card><SectionTitle>Required signals</SectionTitle><ListItem icon={<ReceiptIcon />} title="Contract history" desc={hasContract ? 'Contract response exists' : 'No BE2 contract response'} action={hasContract ? 'OK' : 'Waiting'} /><ListItem icon={<ShieldIcon />} title="Escrow history" desc={app.xrplContract ? 'BE1 escrow response exists' : 'No BE1 escrow response'} action={app.xrplContract ? 'OK' : 'Waiting'} /><BottomCTA label="Home" secondary="Share disabled" onClick={next} /></Page>
 }
-function T13Bills({ go, app }: NavProps) {
-  const hasEvidence = Boolean(app.evidence)
-  return <Page bottomNav><Hero title="Utility evidence" desc="Only BE2 evidence response is shown. No fixed bill amount." /><div className="total-bill"><span>Evidence status</span><strong>{hasEvidence ? 'Evidence uploaded' : 'No evidence'}</strong><p>{hasEvidence ? 'evidence: ' + app.evidence?.id : 'No utility evidence has been registered in backend yet.'}</p></div><SectionTitle>Linked data</SectionTitle><ListItem icon={<ReceiptIcon />} title="Utility evidence" desc={hasEvidence ? app.evidence?.category ?? 'No category response' : 'No uploaded evidence'} action={hasEvidence ? 'OK' : 'Waiting'} /><Card tone={hasEvidence ? 'blue' : 'soft'}><strong>{hasEvidence ? 'Backend response loaded' : 'Real evidence required'}</strong><span>Bill amount and line items should appear only after OCR or BE2 evidence response is available.</span></Card><BottomCTA label={hasEvidence ? 'Confirm' : 'Upload evidence'} secondary="Later" onClick={() => go(hasEvidence ? 't09' : 't14')} /></Page>
-}
-function T14EvidenceUpload({ next, actions, busy, error }: NavProps) {
-  const [file, setFile] = useState<File>()
-  const onFile = (event: ChangeEvent<HTMLInputElement>) => {
-    const selected = event.target.files?.[0]
-    if (!selected) return
-    setFile(selected)
-  }
-  return <Page><Hero title="Upload utility evidence" desc="No fixed amount is inserted. Only BE2 evidence response is shown." /><SectionTitle>Evidence file</SectionTitle><input className="hidden-input" id="utility-evidence-file" type="file" accept="image/png,image/jpeg,application/pdf" onChange={onFile} /><div className="photo-grid evidence-grid"><div>{file ? file.name : 'No file selected'}</div><div /><button onClick={() => document.getElementById('utility-evidence-file')?.click()}>+</button></div><Card tone="soft"><strong>Displayed after upload</strong><span>BE2 evidence ID, category, and CID will be linked back to the utility screen.</span></Card><BackendInline error={error} /><BottomCTA label={busy ? 'Uploading evidence' : 'Upload evidence'} secondary="Cancel" onClick={async () => { try { await actions.uploadEvidence({ category: 'utility_bill', fileName: file?.name ?? 'utility-bill', file, content: 'utility bill evidence uploaded from frontend' }); next() } catch { return } }} /></Page>
+function T13Bills({ go }: NavProps) {
+  return <Page bottomNav><Hero title="Utility" desc="This flow is disabled in the current product build." /><Card tone="soft"><strong>Utility flow disabled</strong><span>Only contract, wallet, escrow, settlement, and remittance flows remain active.</span></Card><BottomCTA label="Home" secondary="Later" onClick={() => go('t09')} /></Page>
 }
 function T17Moveout({ next, app }: NavProps) {
-  const hasEvidence = Boolean(app.evidence)
   const hasSettlement = app.settlements.length > 0
-  return <Page><Hero title="Move-out checklist" desc="No fixed completed state is shown. Only evidence and settlement responses are checked." /><ListItem icon={<CheckIcon />} title="Home condition evidence" desc={hasEvidence ? app.evidence?.id ?? 'Evidence response exists' : 'No evidence response'} action={hasEvidence ? 'OK' : 'Waiting'} /><ListItem icon={<WalletIcon />} title="Settlement response" desc={hasSettlement ? app.settlements[0]?.status ?? 'Settlement response exists' : 'No settlement response'} action={hasSettlement ? 'OK' : 'Waiting'} /><Card tone="soft"><strong>Return preparation</strong><span>Deposit return flow will appear after BE2 settlement response exists.</span></Card><BottomCTA label="Check settlement" onClick={next} /></Page>
+  return <Page><Hero title="Move-out checklist" desc="Only settlement response is checked." /><ListItem icon={<WalletIcon />} title="Settlement response" desc={hasSettlement ? app.settlements[0]?.status ?? 'Settlement response exists' : 'No settlement response'} action={hasSettlement ? 'OK' : 'Waiting'} /><Card tone="soft"><strong>Return preparation</strong><span>Deposit return flow will appear after BE2 settlement response exists.</span></Card><BottomCTA label="Check settlement" onClick={next} /></Page>
 }
 function T18Returned({ next, app }: NavProps) {
   const settlement = app.settlements[0]
@@ -688,25 +650,24 @@ function T20Activity({ next, app }: NavProps) {
   const rows: string[][] = []
   const today = formatDate(new Date()).slice(5).replace('-', '.')
 
-  if (app.tenantAddress) rows.push(['실시간 상태', today, '임차인 지갑 생성', shortHash(app.tenantAddress), 'XRPL'])
-  if (app.landlordAddress) rows.push(['', today, '임대인 지갑 생성', shortHash(app.landlordAddress), 'XRPL'])
-  if (app.contract) rows.push(['', today, 'BE2 계약 응답', app.contract.id, app.contract.status])
-  if (app.xrplContract) rows.push(['', today, 'BE1 에스크로 응답', app.xrplContract.id, app.xrplContract.status])
-  if (app.xrplContract?.depositEscrowTxHash) rows.push(['', today, 'XRPL TX 생성', shortHash(app.xrplContract.depositEscrowTxHash), '온체인'])
-  if (app.evidence) rows.push(['', today, '증빙 업로드', app.evidence.id, app.evidence.category ?? 'evidence'])
+  if (app.tenantAddress) rows.push(['Runtime status', today, 'Tenant wallet created', shortHash(app.tenantAddress), 'XRPL'])
+  if (app.landlordAddress) rows.push(['', today, 'Landlord wallet created', shortHash(app.landlordAddress), 'XRPL'])
+  if (app.contract) rows.push(['', today, 'BE2 contract response', app.contract.id, app.contract.status])
+  if (app.xrplContract) rows.push(['', today, 'BE1 escrow response', app.xrplContract.id, app.xrplContract.status])
+  if (app.xrplContract?.depositEscrowTxHash) rows.push(['', today, 'XRPL TX created', shortHash(app.xrplContract.depositEscrowTxHash), 'On-chain'])
   app.settlements.forEach((settlement, index) => {
-    rows.push([index === 0 ? '정산 응답' : '', today, '정산 상태', settlement.id, settlement.status])
+    rows.push([index === 0 ? 'Settlement response' : '', today, 'Settlement status', settlement.id, settlement.status])
   })
   app.backendEvents.slice().reverse().forEach((event, index) => {
-    rows.push([index === 0 && rows.length === 0 ? '연동 로그' : '', today, event, '프론트 실행 기록', ''])
+    rows.push([index === 0 && rows.length === 0 ? 'Runtime log' : '', today, event, 'Frontend runtime', ''])
   })
 
   return (
     <Page bottomNav>
-      <Hero title="활동 내역" desc="가짜 거래내역 대신 실제 연동 응답과 실행 로그만 보여요" />
-      <div className="chip-wrap compact"><span className="chip selected">전체</span><span className="chip">지갑</span><span className="chip">계약</span><span className="chip">증빙</span></div>
-      {rows.length > 0 ? <ActivityRows rows={rows} /> : <Card tone="soft"><strong>아직 활동 내역이 없어요</strong><span>지갑 생성, 계약 생성, 증빙 업로드가 성공하면 여기에 표시돼요.</span></Card>}
-      <BottomCTA label="임대인 화면 보기" onClick={next} />
+      <Hero title="Activity history" desc="Only wallet, contract, escrow, settlement, and runtime events are shown." />
+      <div className="chip-wrap compact"><span className="chip selected">All</span><span className="chip">Wallet</span><span className="chip">Contract</span></div>
+      {rows.length > 0 ? <ActivityRows rows={rows} /> : <Card tone="soft"><strong>No activity yet</strong><span>Wallet and contract events will appear here after successful backend calls.</span></Card>}
+      <BottomCTA label="Landlord view" onClick={next} />
     </Page>
   )
 }
@@ -816,7 +777,7 @@ function VaultDiagram() {
 
 function ExamplePanel({ kind }: { kind: 'return' | 'bills' | 'proof' }) {
   if (kind === 'return') return <div className="example-panel"><div className="example-calendar"><span>Auto return</span><strong>Waiting</strong><small>Calculated after contract dates exist</small></div><div className="example-chip">D-</div></div>
-  if (kind === 'bills') return <div className="example-panel list-preview"><div><CheckIcon /><span>Electric</span><b>Waiting</b></div><div><ReceiptIcon /><span>Gas</span><b>Evidence</b></div><div><CheckIcon /><span>Water</span><b>Waiting</b></div></div>
+  if (kind === 'bills') return <div className="example-panel list-preview"><div><CheckIcon /><span>Electric</span><b>Waiting</b></div><div><ReceiptIcon /><span>Gas</span><b>Disabled</b></div><div><CheckIcon /><span>Water</span><b>Waiting</b></div></div>
   return <div className="example-panel proof-preview"><div><span>XRPL TX</span><strong>Waiting</strong><small>Shown after BE1 response</small></div><ShieldIcon /></div>
 }
 function Dots({ active, count }: { active: number; count: number }) {

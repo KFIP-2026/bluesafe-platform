@@ -24,27 +24,6 @@ export type BackendContract = {
   updatedAt?: string
 }
 
-export type EvidenceFile = {
-  id: string
-  contractId: string
-  cid?: string
-  sha256?: string
-  category?: string
-  version?: number
-  createdAt?: string
-}
-
-type EvidenceUploadResponse = {
-  evidenceId: string
-  cid: string
-  sha256: string
-  version: number
-  createdAt: string
-  encryptionScheme?: string
-  retainUntil?: string
-  retentionClass?: string
-}
-
 export type SettlementRecord = {
   id: string
   contractId: string
@@ -165,36 +144,6 @@ export const bluesafeApi = {
       method: 'PATCH',
       body: JSON.stringify(input),
     })
-  },
-
-  uploadEvidence(input: {
-    contractId: string
-    category: 'contract_pdf' | 'utility_bill' | 'photo' | 'receipt' | 'other'
-    uploaderId: string
-    fileName: string
-    content?: string
-    file?: Blob
-    retentionDays?: number
-  }) {
-    const form = new FormData()
-    form.set('contractId', input.contractId)
-    form.set('category', input.category)
-    form.set('uploaderId', input.uploaderId)
-    if (input.retentionDays) form.set('retentionDays', String(input.retentionDays))
-    const file = input.file ?? new Blob([input.content ?? ''], { type: 'text/plain' })
-    form.set('file', file, input.fileName)
-    return request<EvidenceUploadResponse>(be2Url, '/v1/evidences', {
-      method: 'POST',
-      body: form,
-    }).then((evidence) => ({
-      id: evidence.evidenceId,
-      contractId: input.contractId,
-      cid: evidence.cid,
-      sha256: evidence.sha256,
-      category: input.category,
-      version: evidence.version,
-      createdAt: evidence.createdAt,
-    }))
   },
 
   trackTx(input: { txHash: string; txType: string; account?: string; network?: 'testnet' | 'mainnet' }) {
