@@ -62,14 +62,14 @@ const tenantScreens: ScreenDef[] = [
   { id: 't03', label: '토스 인증', group: '임차인', component: T03Auth },
   { id: 't04', label: 'ARC KYC', group: '임차인', component: T04Kyc },
   { id: 't05', label: '임대인 초대', group: '임차인', component: T05Invite },
-  { id: 't06', label: '3자 계약서', group: '임차인', component: T06Contract },
+  { id: 't06', label: '계약', group: '임차인', tab: 'tenant', component: T06Contract },
   { id: 't07', label: '보증금 송금', group: '임차인', component: T07Pay },
   { id: 't08', label: '영수증', group: '임차인', component: T08Receipt },
   { id: 't09', label: '홈', group: '임차인', tab: 'tenant', component: T09Home },
   { id: 't10', label: '자동 반환', group: '임차인', component: T10Countdown },
   { id: 't11', label: '안전 리포트', group: '임차인', component: T11Report },
   { id: 't12', label: '평판', group: '임차인', component: T12Reputation },
-  { id: 't13', label: '공과금', group: '임차인', tab: 'tenant', component: T13Bills },
+  { id: 't13', label: '공과금', group: '임차인', component: T13Bills },
   { id: 't17', label: '퇴실 체크', group: '임차인', component: T17Moveout },
   { id: 't18', label: '반환 완료', group: '임차인', component: T18Returned },
   { id: 't19', label: '본국 송금', group: '임차인', component: T19Fx },
@@ -312,7 +312,7 @@ function RoleSelect({ go, actions }: NavProps) {
             <small>계약 확인, 월세 정산, 반환 승인</small>
           </button>
         </div>
-        <div className="entry-bottom role-bottom"><button className="white-cta" onClick={start}>시작하기</button><span>{role === 'tenant' ? '임차인 보호 플로우로 시작' : '임대인 계약 플로우로 시작'}</span></div>
+        <div className="entry-bottom role-bottom"><button className="white-cta" onClick={start}>시작하기</button><span>{role === 'tenant' ? '임차인 계약 플로우로 시작' : '임대인 계약 플로우로 시작'}</span></div>
       </div>
     </Page>
   )
@@ -572,7 +572,7 @@ function T09Home({ go, app, error }: NavProps) {
           <span>거주</span>
           <strong>{hasLeaseDates ? String(livedDays) + '일차' : '--'}</strong>
         </div>
-        <div className="quick-grid"><button>리포트</button><button onClick={() => go('t13')}>공과금</button><button onClick={() => go('t10')}>반환</button><button>계약서</button></div>
+        <div className="quick-grid"><button onClick={() => go('t11')}>리포트</button><button onClick={() => go('t06')}>계약</button><button onClick={() => go('t10')}>반환</button><button onClick={() => go('t12')}>내정보</button></div>
       </div>
       <div className="home-tasks">
         <SectionTitle right="전체">오늘 할 일</SectionTitle>
@@ -864,7 +864,7 @@ function ActionModal({
 }
 
 function TenantNav({ active, go }: { active: ScreenId; go: (id: ScreenId) => void }) {
-  return <nav className="bottom-nav four-tabs">{[['t09', '홈', <HomeIcon />], ['t20', '내역', <HistoryIcon />], ['t13', '보호', <ShieldIcon />], ['t12', '내정보', <UserIcon />]].map(([id, label, icon]) => <button key={id as string} className={active === id ? 'active' : ''} onClick={() => go(id as ScreenId)}>{icon}<span>{label as string}</span></button>)}</nav>
+  return <nav className="bottom-nav four-tabs">{[['t09', '홈', <HomeIcon />], ['t20', '내역', <HistoryIcon />], ['t06', '계약', <ReceiptIcon />], ['t12', '내정보', <UserIcon />]].map(([id, label, icon]) => <button key={id as string} className={active === id ? 'active' : ''} onClick={() => go(id as ScreenId)}>{icon}<span>{label as string}</span></button>)}</nav>
 }
 
 function LandlordNav({ active, go }: { active: ScreenId; go: (id: ScreenId) => void }) {
