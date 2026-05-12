@@ -628,8 +628,8 @@ function App() {
     walletProvider: '',
     walletName: '',
     walletNetwork: '',
-    tenantId: 'tenant',
-    landlordId: 'landlord',
+    tenantId: '',
+    landlordId: '',
     tenantAddress: '',
     landlordAddress: '',
     settlements: [],
@@ -681,8 +681,8 @@ function App() {
             walletNetwork: session.network,
           }
           return prev.selectedRole === 'tenant'
-            ? { ...nextState, tenantAddress: session.account }
-            : { ...nextState, landlordAddress: session.account }
+            ? { ...nextState, tenantAddress: session.account, tenantId: session.account }
+            : { ...nextState, landlordAddress: session.account, landlordId: session.account }
         })
       })
     },
@@ -690,7 +690,9 @@ function App() {
       if (app.contract) return app.contract
       return run(lang === 'ko' ? 'BE2 계약 생성' : 'BE2 contract created', async () => {
         if (!backendConfig.hasBe2) throw new Error('BE2 URL is not configured')
-        const contract = await bluesafeApi.createOperationalContract({ tenantId: app.tenantId, landlordId: app.landlordId })
+        const participants = getParticipantIds(app)
+        if (!participants) throw new Error('Tenant and landlord identifiers are required')
+        const contract = await bluesafeApi.createOperationalContract(participants)
         setApp((prev) => ({ ...prev, contract }))
         return contract
       })
@@ -703,6 +705,8 @@ function App() {
         }
         if (!backendConfig.hasBe1) throw new Error('BE1 URL is not configured')
         if (!app.tenantAddress || !app.landlordAddress) throw new Error('Tenant and landlord wallet addresses are required')
+        const participants = getParticipantIds(app)
+        if (!participants) throw new Error('Tenant and landlord identifiers are required')
         if (!contract.depositAmount || !contract.stakeAmount) throw new Error('Contract depositAmount and stakeAmount are required')
         if (!contract.startsAt || !contract.endsAt) throw new Error('Contract startsAt and endsAt are required')
         const endsAt = new Date(contract.endsAt)
@@ -718,8 +722,8 @@ function App() {
           endsAt: contract.endsAt,
           finishAfter,
           cancelAfter,
-          tenantPii: app.tenantId,
-          landlordPii: app.landlordId,
+          tenantPii: participants.tenantId,
+          landlordPii: participants.landlordId,
         })
         const txHash = xrplContract.depositEscrowTxHash
         if (!txHash) throw new Error('BE1 did not return an escrow transaction hash')
@@ -829,7 +833,7 @@ function WalletConnect({ go, app, actions, error, busy, lang }: NavProps) {
       <div className="wallet-page">
         <Hero title={c.walletTitle} desc={isTenant ? c.walletTenantDesc : c.walletLandlordDesc} />
         <div className="wallet-visual" aria-hidden="true"><div className="wallet-orbit"><span /><span /><strong>XRPL</strong></div></div>
-        <div className="wallet-card"><div><span>{app.walletConnected ? c.walletConnected : c.walletPending}</span><strong>{app.walletConnected ? shortAddress : c.walletCreate}</strong><p>{app.walletConnected ? `${app.walletProvider} · ${app.walletNetwork || 'XRPL'} · ${c.walletCustody}` : c.walletServer}</p></div></div>
+        <div className="wallet-card"><div><span>{app.walletConnected ? c.walletConnected : c.walletPending}</span><strong>{app.walletConnected ? shortAddress : c.walletCreate}</strong><p>{app.walletConnected ? `${app.walletProvider} · ${app.walletNetwork || c.responseNone} · ${c.walletCustody}` : c.walletServer}</p></div></div>
         <div className="wallet-points"><span>{c.walletPoint1}</span><span>{c.walletPoint2}</span><span>{c.walletPoint3}</span></div>
         {error && <p className="wallet-error">{error}</p>}
         <div className="entry-bottom wallet-bottom"><button className="white-cta" onClick={app.walletConnected ? continueToRole : connect}>{app.walletConnected ? c.continue : connecting || busy ? c.walletConnecting : c.walletConnect}</button><span>{isTenant ? c.tenantFlow : c.landlordFlow}</span></div>
@@ -865,7 +869,7 @@ function T03Auth({ next, lang }: NavProps) {
       <ListItem icon={<CheckIcon />} title={c.ownerAccount} desc={c.ownerAccountDesc} />
       <p className="notice">{c.authNotice}</p>
       <BottomCTA label={c.tossAuth} secondary={c.terms} onClick={() => setOpen(true)} />
-      <ActionModal open={open} title={c.authDone} onClose={() => setOpen(false)} primaryLabel={c.next} onPrimary={next}><p>{c.authSafeDesc}</p><Info label="role" value="tenant" /></ActionModal>
+      <ActionModal open={open} title={c.authDone} onClose={() => setOpen(false)} primaryLabel={c.next} onPrimary={next}><p>{c.authSafeDesc}</p></ActionModal>
     </Page>
   )
 }
@@ -880,7 +884,7 @@ function T05Invite({ next, lang }: NavProps) {
   return (
     <Page>
       <Hero title={c.inviteTitle} desc={c.inviteDesc} />
-      <Card tone="soft"><Info label={c.inviteLink} value={c.responseNone} /><div className="chip-wrap"><span className="chip">{c.copy}</span><span className="chip">{c.kakao}</span><span className="chip">{c.sms}</span></div></Card>
+      <Card tone="soft"><strong>{c.responseNone}</strong><span>{c.inviteNeeded}</span></Card>
       <SectionTitle>{c.landlordTodo}</SectionTitle>
       <Timeline items={[{ title: c.inviteStep1, desc: c.inviteStep1Desc }, { title: c.inviteStep2, desc: c.inviteStep2Desc }, { title: c.inviteStep3, desc: c.inviteStep3Desc }]} />
       <BottomCTA label={c.sendKakao} secondary={c.later} onClick={next} />
@@ -1039,7 +1043,7 @@ function L01Invited({ next, app, lang }: NavProps) {
 function L02Verify({ next, lang }: NavProps) {
   const c = copy[lang]
   const [open, setOpen] = useState(false)
-  return <Page><StepperHeader current={0} /><Hero title={c.lVerifyTitle} desc={c.lVerifyDesc} /><ListItem icon="1" title={c.personal} desc={lang === 'ko' ? '주민등록증 본인 명의' : 'Personal ID in your name'} /><ListItem icon="2" title={c.business} desc={lang === 'ko' ? '사업자등록증 + 본인 명의' : 'Business certificate and personal verification'} /><ListItem icon="3" title={c.corporation} desc={lang === 'ko' ? '법인 인감 + 대표자 인증' : 'Corporate seal and representative verification'} /><p className="notice">{c.lVerifyNotice}</p><BottomCTA label={c.tossAuth} onClick={() => setOpen(true)} /><ActionModal open={open} title={c.authDone} onClose={() => setOpen(false)} primaryLabel={c.next} onPrimary={next}><p>{c.lVerifyNotice}</p><Info label="role" value="landlord" /></ActionModal></Page>
+  return <Page><StepperHeader current={0} /><Hero title={c.lVerifyTitle} desc={c.lVerifyDesc} /><ListItem icon="1" title={c.personal} desc={lang === 'ko' ? '주민등록증 본인 명의' : 'Personal ID in your name'} /><ListItem icon="2" title={c.business} desc={lang === 'ko' ? '사업자등록증 + 본인 명의' : 'Business certificate and personal verification'} /><ListItem icon="3" title={c.corporation} desc={lang === 'ko' ? '법인 인감 + 대표자 인증' : 'Corporate seal and representative verification'} /><p className="notice">{c.lVerifyNotice}</p><BottomCTA label={c.tossAuth} onClick={() => setOpen(true)} /><ActionModal open={open} title={c.authDone} onClose={() => setOpen(false)} primaryLabel={c.next} onPrimary={next}><p>{c.lVerifyNotice}</p></ActionModal></Page>
 }
 
 function L03Property({ next, app, lang }: NavProps) {
@@ -1067,7 +1071,7 @@ function L06Home({ go, app, lang }: NavProps) {
 
 function L07Detail({ app, lang }: NavProps) {
   const c = copy[lang]
-  return <Page><Hero title={c.propertyDetail} desc={c.propertyDetailDesc} /><Card tone="soft"><Info label="BE2" value={app.contract?.id ?? c.responseNone} mono={Boolean(app.contract?.id)} /><Info label="BE1" value={app.xrplContract?.id ?? c.responseNone} mono={Boolean(app.xrplContract?.id)} /><Info label={c.status} value={statusText(app.contract?.status ?? app.xrplContract?.status, lang)} /></Card><SectionTitle>{c.tenant}</SectionTitle><ListItem icon={<UserIcon />} title={c.tenantId} desc={app.tenantId} action={app.tenantAddress ? c.walletLinked : c.waiting} /></Page>
+  return <Page><Hero title={c.propertyDetail} desc={c.propertyDetailDesc} /><Card tone="soft"><Info label="BE2" value={app.contract?.id ?? c.responseNone} mono={Boolean(app.contract?.id)} /><Info label="BE1" value={app.xrplContract?.id ?? c.responseNone} mono={Boolean(app.xrplContract?.id)} /><Info label={c.status} value={statusText(app.contract?.status ?? app.xrplContract?.status, lang)} /></Card><SectionTitle>{c.tenant}</SectionTitle><ListItem icon={<UserIcon />} title={c.tenantId} desc={app.tenantId || (app.tenantAddress ? shortHash(app.tenantAddress) : c.responseNone)} action={app.tenantAddress ? c.walletLinked : c.waiting} /></Page>
 }
 
 function L08LateRent({ next, app, lang }: NavProps) {
@@ -1259,8 +1263,10 @@ function localizeError(message: string, lang: Lang) {
   if (lang === 'en') return message || 'Request failed'
   if (!message) return '요청 처리에 실패했어요'
   if (message.includes('Failed to fetch')) return '서버에 연결하지 못했어요'
+  if (message.includes('Wallet API URL is not configured')) return '지갑 API 주소가 설정되지 않았어요'
   if (message.includes('URL is not configured')) return '백엔드 주소가 설정되지 않았어요'
   if (message.includes('wallet addresses are required')) return '임차인과 임대인 지갑 주소가 모두 필요해요'
+  if (message.includes('identifiers are required')) return '임차인과 임대인 식별자가 모두 필요해요'
   if (message.includes('depositAmount') || message.includes('stakeAmount')) return '계약의 보증금 또는 락업 수량 응답이 필요해요'
   if (message.includes('startsAt') || message.includes('endsAt')) return '계약 시작일과 종료일 응답이 필요해요'
   if (message.includes('transaction hash')) return '에스크로 트랜잭션 해시 응답이 필요해요'
@@ -1289,6 +1295,13 @@ function buildLandlordRows(app: AppModel, lang: Lang) {
   if (app.xrplContract) rows.push(['', today, c.be1EscrowResponse, app.xrplContract.id, statusText(app.xrplContract.status, lang)])
   app.settlements.forEach((item, index) => rows.push([index === 0 ? c.settlement : '', today, c.settlementStatus, item.id, statusText(item.status, lang)]))
   return rows
+}
+
+function getParticipantIds(app: AppModel) {
+  const tenantId = app.tenantId || app.tenantAddress
+  const landlordId = app.landlordId || app.landlordAddress
+  if (!tenantId || !landlordId) return undefined
+  return { tenantId, landlordId }
 }
 
 function getLeaseMetrics(app: AppModel) {

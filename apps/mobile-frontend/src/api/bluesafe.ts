@@ -51,6 +51,7 @@ export type CreateBe1ContractInput = {
 const be1Url = trimSlash(import.meta.env.VITE_BE1_URL)
 const be2Url = trimSlash(import.meta.env.VITE_BE2_URL)
 const authToken = import.meta.env.VITE_BLUESAFE_AUTH_TOKEN?.trim()
+const xrplNetwork = parseXrplNetwork(import.meta.env.VITE_XRPL_NETWORK)
 
 export const backendConfig = {
   be1Url,
@@ -61,6 +62,10 @@ export const backendConfig = {
 
 function trimSlash(value: unknown) {
   return typeof value === 'string' ? value.replace(/\/$/, '') : ''
+}
+
+function parseXrplNetwork(value: unknown) {
+  return value === 'testnet' || value === 'mainnet' ? value : undefined
 }
 
 async function request<T>(baseUrl: string, path: string, init?: RequestInit): Promise<T> {
@@ -147,9 +152,10 @@ export const bluesafeApi = {
   },
 
   trackTx(input: { txHash: string; txType: string; account?: string; network?: 'testnet' | 'mainnet' }) {
+    const body = xrplNetwork && !input.network ? { network: xrplNetwork, ...input } : input
     return request(be2Url, '/v1/xrpl/track', {
       method: 'POST',
-      body: JSON.stringify({ network: 'testnet', ...input }),
+      body: JSON.stringify(body),
     })
   },
 

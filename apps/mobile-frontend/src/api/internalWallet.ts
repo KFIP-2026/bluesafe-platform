@@ -31,6 +31,10 @@ export type InternalWalletSession = {
 }
 
 async function walletRequest<T>(path: string, init?: RequestInit) {
+  if (!walletBaseUrl) {
+    throw new Error('Wallet API URL is not configured')
+  }
+
   const response = await fetch(`${walletBaseUrl}${path}`, {
     headers: { 'Content-Type': 'application/json', ...init?.headers },
     ...init,
@@ -61,7 +65,7 @@ function normalizeWallet(data: WalletConnectResponse): InternalWalletSession {
 
   return {
     account,
-    network: typeof data.network === 'string' ? data.network : data.network?.label || data.network?.id || 'testnet',
+    network: typeof data.network === 'string' ? data.network : data.network?.label || data.network?.id || '',
     provider: 'BlueSafe Wallet',
   }
 }

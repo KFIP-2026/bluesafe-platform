@@ -2680,7 +2680,7 @@ svg {
   border-radius: 999px;
   background:
     radial-gradient(circle at center, #fff 58%, transparent 59%),
-    conic-gradient(var(--brand) 0 62%, #eef0f2 62% 100%);
+    conic-gradient(var(--brand) 0 var(--progress, 0%), #eef0f2 var(--progress, 0%) 100%);
 }
 
 .count-ring strong,
