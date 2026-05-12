@@ -37,6 +37,15 @@ import { WalletModule } from './wallet/wallet.module';
         // 운영 지갑 시드 — 비어있으면 부팅은 OK, TX 호출 시점에 실패
         XRPL_OPERATOR_SEED: Joi.string().allow('').default(''),
 
+        // IOU(RLUSD 등) 계약 — 요청 생략 시 기본 issuer/통화코드(3자 또는 40hex)
+        XRPL_IOU_ISSUER: Joi.string().allow('').default(''),
+        XRPL_IOU_CURRENCY: Joi.string().allow('').default(''),
+        /** IOU 발행자 시드 — 있으면 Payment를 발행자 계정에서 직접 제출(tecPATH_DRY 회피) */
+        XRPL_IOU_ISSUER_SEED: Joi.string().allow('').default(''),
+
+        /** 내부 지갑 POST /api/wallet/fund-iou 기본 입금액(IOU value) */
+        XRPL_WALLET_IOU_FUND_AMOUNT: Joi.string().allow('').default('1'),
+
         // PostgreSQL
         DATABASE_URL: Joi.string()
           .uri({ scheme: ['postgresql', 'postgres'] })

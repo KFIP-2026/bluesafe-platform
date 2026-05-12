@@ -1,20 +1,23 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import type { Wallet } from 'xrpl';
+import type { Amount, Wallet } from 'xrpl';
 import {
   ENCRYPTION_SERVICE,
   type EncryptionService,
 } from '../shared/crypto/encryption.interface';
+import { buildIouAmount, normalizeIouCurrencyCode } from '../xrpl/iou-lines.util';
 import { EscrowService } from '../xrpl/escrow.service';
 import { SignerListService } from '../xrpl/signer-list.service';
 import { ContractStatus } from './contract-status.enum';
 import { Contract } from './contract.entity';
 
+export type ContractAssetMode = 'XRP' | 'IOU';
+
 export interface CreateContractInput {
   tenantAddress: string;
   landlordAddress: string;
-  depositAmount: string; // XRP drops
+  depositAmount: string;
   stakeAmount: string;
   startsAt: Date;
   endsAt: Date;
@@ -24,6 +27,10 @@ export interface CreateContractInput {
   landlordPii: string;
   /** 월간 리포트 이메일 발송 대상. 부재 시 발송 skip. */
   tenantEmail?: string | null;
+  assetMode?: ContractAssetMode;
+  /** assetMode=IOU 일 때 (정규화된 issuer / currency) */
+  iouIssuer?: string | null;
+  iouCurrency?: string | null;
 }
 
 export interface LockTenantDepositInput extends CreateContractInput {
@@ -44,6 +51,9 @@ export interface ContractDto {
    * 본선에서 KMS 전환 시 EncryptionService 인터페이스 교체로 처리.
    */
   contractAccountSeed: string | null;
+  assetMode: string;
+  iouIssuer: string | null;
+  iouCurrency: string | null;
   depositAmount: string;
   stakeAmount: string;
   depositEscrowSequence: number | null;
@@ -75,6 +85,7 @@ export class ContractsService {
   ) {}
 
   async create(input: CreateContractInput): Promise<ContractDto> {
+    const assetMode = input.assetMode ?? 'XRP';
     const entity = this.repo.create({
       tenantAddress: input.tenantAddress,
       landlordAddress: input.landlordAddress,
@@ -88,6 +99,12 @@ export class ContractsService {
       landlordPiiCipher: this.encryption.encrypt(input.landlordPii),
       tenantEmail: input.tenantEmail ?? null,
       status: ContractStatus.Pending,
+      assetMode,
+      iouIssuer: assetMode === 'IOU' ? (input.iouIssuer ?? null) : null,
+      iouCurrency:
+        assetMode === 'IOU' && input.iouCurrency
+          ? normalizeIouCurrencyCode(input.iouCurrency)
+          : null,
     });
     const saved = await this.repo.save(entity);
     return this.toDto(saved);
@@ -118,7 +135,9 @@ export class ContractsService {
    * 후속 BullMQ 워커 도입 후 처리.
    */
   async lockTenantDeposit(input: LockTenantDepositInput): Promise<ContractDto> {
-    // 1. Pending 상태로 row 생성
+    const { deposit: depositAmount, stake: stakeAmount } =
+      this.escrowAmounts(input);
+
     const contract = await this.create({
       tenantAddress: input.tenantAddress,
       landlordAddress: input.landlordAddress,
@@ -130,28 +149,29 @@ export class ContractsService {
       cancelAfter: input.cancelAfter,
       tenantPii: input.tenantPii,
       landlordPii: input.landlordPii,
+      tenantEmail: input.tenantEmail,
+      assetMode: input.assetMode,
+      iouIssuer: input.iouIssuer,
+      iouCurrency: input.iouCurrency,
     });
     this.logger.log(`Contract created: id=${contract.id}, locking on Testnet`);
 
-    // 2. 보증금 escrow (contract → tenant)
     const deposit = await this.escrowService.createEscrow({
       account: input.contractWallet,
       destination: input.tenantAddress,
-      amount: input.depositAmount,
+      amount: depositAmount,
       finishAfter: input.finishAfter,
       cancelAfter: input.cancelAfter,
     });
 
-    // 3. Stake escrow (contract → landlord)
     const stake = await this.escrowService.createEscrow({
       account: input.contractWallet,
       destination: input.landlordAddress,
-      amount: input.stakeAmount,
+      amount: stakeAmount,
       finishAfter: input.finishAfter,
       cancelAfter: input.cancelAfter,
     });
 
-    // 4. 3-of-3 SignerListSet on contract account (quorum 2)
     const signerList = await this.signerListService.setSignerList({
       account: input.contractWallet,
       signers: [
@@ -162,7 +182,6 @@ export class ContractsService {
       quorum: 2,
     });
 
-    // 5. Contract row 업데이트 (seed도 암호화 영속 — Reconciler가 Payment 서명 시 사용)
     if (!input.contractWallet.seed) {
       throw new Error('contractWallet must have a seed for persistence');
     }
@@ -187,6 +206,29 @@ export class ContractsService {
       `Contract locked: id=${updated.id}, deposit=${deposit.txHash}, stake=${stake.txHash}, signerList=${signerList.txHash}`,
     );
     return updated;
+  }
+
+  private escrowAmounts(input: LockTenantDepositInput): {
+    deposit: Amount;
+    stake: Amount;
+  } {
+    const mode = input.assetMode ?? 'XRP';
+    if (mode === 'XRP') {
+      return {
+        deposit: input.depositAmount,
+        stake: input.stakeAmount,
+      };
+    }
+    const issuer = input.iouIssuer;
+    const currency = input.iouCurrency;
+    if (!issuer || !currency) {
+      throw new Error('IOU escrow requires iouIssuer and iouCurrency');
+    }
+    const cur = normalizeIouCurrencyCode(currency);
+    return {
+      deposit: buildIouAmount(issuer, cur, input.depositAmount),
+      stake: buildIouAmount(issuer, cur, input.stakeAmount),
+    };
   }
 
   private toDto(c: Contract): ContractDto {

@@ -66,6 +66,19 @@ function normalizeWallet(data: WalletConnectResponse): InternalWalletSession {
   }
 }
 
+export type InternalWalletIouFundResult = {
+  message: string
+  role: string
+  address: string
+  issuer: string
+  currency: string
+  amount: string
+  trustSetTxHash: string
+  paymentTxHash: string
+  explorerPaymentUrl: string
+  network: string
+}
+
 export async function connectInternalWallet(role: WalletRole) {
   const data = await walletRequest<WalletConnectResponse>('/api/wallet/connect', {
     method: 'POST',
@@ -73,4 +86,22 @@ export async function connectInternalWallet(role: WalletRole) {
   })
 
   return normalizeWallet(data)
+}
+
+/** 내부 지갑에 IOU 입금 (BE1 `POST /api/wallet/fund-iou`). 운영자 시드에 IOU 잔액 필요. */
+export async function fundInternalWalletIou(input?: {
+  role?: WalletRole
+  issuer?: string
+  currency?: string
+  amount?: string
+}) {
+  return walletRequest<InternalWalletIouFundResult>('/api/wallet/fund-iou', {
+    method: 'POST',
+    body: JSON.stringify({
+      role: input?.role,
+      issuer: input?.issuer,
+      currency: input?.currency,
+      amount: input?.amount,
+    }),
+  })
 }

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { XrplModule } from './xrpl/xrpl.module';
 import { WalletModule } from './wallet/wallet.module';
 
 @Module({
@@ -9,6 +10,7 @@ import { WalletModule } from './wallet/wallet.module';
       envFilePath: ['.env'],
       ignoreEnvFile: false,
     }),
+    XrplModule,
     WalletModule,
   ],
 })

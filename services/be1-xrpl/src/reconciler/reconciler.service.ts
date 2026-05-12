@@ -5,7 +5,6 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Queue } from 'bullmq';
 import { Repository } from 'typeorm';
-import { Payment, Wallet } from 'xrpl';
 import { ContractStatus } from '../contracts/contract-status.enum';
 import {
   ContractsService,
@@ -19,7 +18,7 @@ import {
   EMAIL_SERVICE,
   type EmailService,
 } from '../shared/email/email.interface';
-import { XrplClientService } from '../xrpl/xrpl-client.service';
+import { SettlementPaymentService } from '../xrpl/settlement-payment.service';
 import { buildMonthlyReportEmail } from './email/monthly-report.template';
 import { KEPCO_CLIENT, type KepcoClient } from './kepco/kepco-client.interface';
 import { buildReconcileMemo, sha256Hex } from './payment-memo.builder';
@@ -34,7 +33,7 @@ export class ReconcilerService {
     @InjectRepository(Reconciliation)
     private readonly recordRepo: Repository<Reconciliation>,
     private readonly contractsService: ContractsService,
-    private readonly xrplClient: XrplClientService,
+    private readonly settlementPayment: SettlementPaymentService,
     @Inject(KEPCO_CLIENT) private readonly kepcoClient: KepcoClient,
     @InjectQueue(XRPL_TX_RETRY_QUEUE)
     private readonly retryQueue: Queue<XrplTxRetryJob>,
@@ -161,20 +160,21 @@ export class ReconcilerService {
     let thrownError: Error | null = null;
 
     try {
-      txHash = await this.submitPayment(
-        contract.contractAccountAddress,
-        contract.landlordAddress,
-        contract.contractAccountSeed,
-        usage.chargeKrw,
-        {
-          contractId,
-          yearMonth,
-          kepcoUsageHash: usageHash,
-          // 예선: 임대인 청구액 = KEPCO 사용량 (별도 claim entity는 후속)
-          landlordClaimHash: usageHash,
-          calculatedAmountDrops: String(usage.chargeKrw),
-        },
-      );
+      txHash = await this.settlementPayment.submitXrpPayment({
+        sourceAddress: contract.contractAccountAddress,
+        destinationAddress: contract.landlordAddress,
+        sourceSeed: contract.contractAccountSeed,
+        amountDrops: String(usage.chargeKrw),
+        Memos: [
+          buildReconcileMemo({
+            contractId,
+            yearMonth,
+            kepcoUsageHash: usageHash,
+            landlordClaimHash: usageHash,
+            calculatedAmountDrops: String(usage.chargeKrw),
+          }),
+        ],
+      });
     } catch (err) {
       status = ReconciliationStatus.Failed;
       errorMessage = (err as Error).message;
@@ -246,38 +246,6 @@ export class ReconcilerService {
         `monthly report failed for ${contract.id} ${info.yearMonth}: ${(err as Error).message}`,
       );
     }
-  }
-
-  private async submitPayment(
-    sourceAddress: string,
-    destinationAddress: string,
-    sourceSeed: string,
-    amountKrw: number,
-    memoPayload: Parameters<typeof buildReconcileMemo>[0],
-  ): Promise<string> {
-    // KRW → drops 변환: 예선은 1:1 (oracle은 후속)
-    const amountDrops = String(amountKrw);
-    const memo = buildReconcileMemo(memoPayload);
-    const wallet = Wallet.fromSeed(sourceSeed);
-
-    const tx: Payment = {
-      TransactionType: 'Payment',
-      Account: sourceAddress,
-      Destination: destinationAddress,
-      Amount: amountDrops,
-      Memos: [memo],
-    };
-
-    const client = this.xrplClient.getClient();
-    const response = await client.submitAndWait(tx, { wallet });
-    const meta = response.result.meta;
-    if (typeof meta !== 'object' || meta === null) {
-      throw new Error('Payment response meta missing or string');
-    }
-    if (meta.TransactionResult !== 'tesSUCCESS') {
-      throw new Error(`Payment failed: ${meta.TransactionResult}`);
-    }
-    return response.result.hash;
   }
 
   private previousMonthInKst(now: Date = new Date()): string {

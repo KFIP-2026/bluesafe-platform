@@ -13,6 +13,9 @@ export interface ContractResponseDto {
   tenantAddress: string;
   landlordAddress: string;
   contractAccountAddress: string | null;
+  assetMode: string;
+  iouIssuer: string | null;
+  iouCurrency: string | null;
   depositAmount: string;
   stakeAmount: string;
   depositEscrowSequence: number | null;
@@ -36,6 +39,9 @@ export function toContractResponse(dto: ContractDto): ContractResponseDto {
     tenantAddress: dto.tenantAddress,
     landlordAddress: dto.landlordAddress,
     contractAccountAddress: dto.contractAccountAddress,
+    assetMode: dto.assetMode,
+    iouIssuer: dto.iouIssuer,
+    iouCurrency: dto.iouCurrency,
     depositAmount: dto.depositAmount,
     stakeAmount: dto.stakeAmount,
     depositEscrowSequence: dto.depositEscrowSequence,

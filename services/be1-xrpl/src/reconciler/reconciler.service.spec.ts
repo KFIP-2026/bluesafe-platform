@@ -7,6 +7,7 @@ import { ContractStatus } from '../contracts/contract-status.enum';
 import { ContractsService } from '../contracts/contracts.service';
 import { XRPL_TX_RETRY_QUEUE } from '../queue/xrpl-tx-retry.types';
 import { EMAIL_SERVICE } from '../shared/email/email.interface';
+import { SettlementPaymentService } from '../xrpl/settlement-payment.service';
 import { XrplClientService } from '../xrpl/xrpl-client.service';
 import { KEPCO_CLIENT } from './kepco/kepco-client.interface';
 import { ReconcilerService } from './reconciler.service';
@@ -31,12 +32,13 @@ describe('ReconcilerService', () => {
   let emailService: { send: jest.Mock };
   let configService: { get: jest.Mock };
 
-  const VALID_SEED = Wallet.generate().seed!;
+  const contractWallet = Wallet.generate();
+  const VALID_SEED = contractWallet.seed!;
   const validContract = {
     id: 'c1',
     status: ContractStatus.Locked,
     contractAccountSeed: VALID_SEED,
-    contractAccountAddress: 'rContractXXXXXXXXXXXXXXXXXXXXXXXXX',
+    contractAccountAddress: contractWallet.classicAddress,
     landlordAddress: 'rLandlordXXXXXXXXXXXXXXXXXXXXXXXXX',
   };
 
@@ -81,6 +83,7 @@ describe('ReconcilerService', () => {
     const moduleFixture = await Test.createTestingModule({
       providers: [
         ReconcilerService,
+        SettlementPaymentService,
         { provide: getRepositoryToken(Reconciliation), useValue: recordRepo },
         { provide: ContractsService, useValue: contractsService },
         { provide: XrplClientService, useValue: xrplClient },

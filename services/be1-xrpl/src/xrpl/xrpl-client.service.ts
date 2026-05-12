@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Client, Wallet, dropsToXrp } from 'xrpl';
+import { findTrustLine } from './iou-lines.util';
 
 @Injectable()
 export class XrplClientService implements OnModuleInit, OnModuleDestroy {
@@ -53,6 +54,27 @@ export class XrplClientService implements OnModuleInit, OnModuleDestroy {
     return funded.wallet;
   }
 
+  /**
+   * Testnet에서 TrustSet/Payment 수수료용 XRP가 부족하면 faucet으로 보충.
+   * 계정이 없거나 잔액이 min 미만이면 fundWallet 호출.
+   */
+  async ensureTestnetXrpForFees(wallet: Wallet): Promise<void> {
+    const client = this.getClient();
+    const minDrops = 10_000_000n;
+    try {
+      const r = await client.request({
+        command: 'account_info',
+        account: wallet.classicAddress,
+        ledger_index: 'validated',
+      });
+      const drops = BigInt(r.result.account_data.Balance);
+      if (drops >= minDrops) return;
+    } catch {
+      /* account 없음 */
+    }
+    await client.fundWallet(wallet);
+  }
+
   /** account의 XRP 잔액(소수점 표기) 반환 */
   async getXrpBalance(address: string): Promise<string> {
     const client = this.getClient();
@@ -63,5 +85,25 @@ export class XrplClientService implements OnModuleInit, OnModuleDestroy {
     });
     const balanceDrops = response.result.account_data.Balance;
     return dropsToXrp(balanceDrops).toString();
+  }
+
+  /** 계약 계정이 보유한 IOU 잔액(없으면 null). */
+  async getIouBalance(
+    account: string,
+    issuer: string,
+    currency: string,
+  ): Promise<{ currency: string; issuer: string; value: string } | null> {
+    const line = await findTrustLine(
+      this.getClient(),
+      account,
+      issuer,
+      currency,
+    );
+    if (!line) return null;
+    return {
+      currency: line.currency,
+      issuer,
+      value: line.balance,
+    };
   }
 }

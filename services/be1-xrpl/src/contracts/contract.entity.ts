@@ -34,10 +34,23 @@ export class Contract {
   @Column({ type: 'text', nullable: true })
   contractAccountSeedCipher!: string | null;
 
-  // 금액 (XRP drops, string 저장 — 64비트 정수도 안전)
+  /** `XRP` — drops 문자열 / `IOU` — IssuedCurrency value 소수 문자열 */
+  @Column({ type: 'varchar', length: 8, default: 'XRP' })
+  assetMode!: string;
+
+  /** IOU issuer classic address (assetMode=IOU 일 때만) */
+  @Column({ type: 'varchar', length: 35, nullable: true })
+  iouIssuer!: string | null;
+
+  /** IOU currency: 3글자 코드 또는 40자리 hex (assetMode=IOU 일 때만) */
+  @Column({ type: 'varchar', length: 40, nullable: true })
+  iouCurrency!: string | null;
+
+  /** assetMode=XRP: drops 정수 문자열 / assetMode=IOU: IssuedCurrency value 소수 문자열 */
   @Column()
   depositAmount!: string;
 
+  /** assetMode=XRP: drops 정수 문자열 / assetMode=IOU: IssuedCurrency value 소수 문자열 */
   @Column()
   stakeAmount!: string;
 

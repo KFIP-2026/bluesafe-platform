@@ -109,6 +109,27 @@ describe('EscrowService', () => {
     ).rejects.toThrow(/EscrowCreate failed: tecINSUF_RESERVE_LINE/);
   });
 
+  it('submits EscrowCreate with IOU Amount object', async () => {
+    mockSubmitAndWait.mockResolvedValue(makeSuccessResponse());
+    const iouAmount = {
+      currency: 'USD',
+      issuer: 'rIssuerXXXXXXXXXXXXXXXXXXXXXXXXXX',
+      value: '12.5',
+    };
+    const finishAfter = new Date(Date.now() + 60_000);
+    const cancelAfter = new Date(Date.now() + 120_000);
+    await service.createEscrow({
+      account: mockWallet,
+      destination: 'rDest',
+      amount: iouAmount,
+      finishAfter,
+      cancelAfter,
+    });
+    const [tx] = mockSubmitAndWait.mock.calls[0] as [Record<string, unknown>];
+    expect(tx.Amount).toEqual(iouAmount);
+    expect(tx.CancelAfter).toBeGreaterThan(tx.FinishAfter as number);
+  });
+
   it('passes optional fields (cancelAfter, condition, destinationTag) through', async () => {
     mockSubmitAndWait.mockResolvedValue(makeSuccessResponse());
 
@@ -126,5 +147,51 @@ describe('EscrowService', () => {
     expect(tx.CancelAfter).toBeGreaterThan(tx.FinishAfter as number);
     expect(tx.Condition).toBeDefined();
     expect(tx.DestinationTag).toBe(42);
+  });
+
+  it('submits EscrowFinish with Owner and OfferSequence', async () => {
+    mockSubmitAndWait.mockResolvedValue({
+      result: {
+        hash: 'C'.repeat(64),
+        ledger_index: 200,
+        validated: true,
+        meta: { TransactionResult: 'tesSUCCESS', AffectedNodes: [] },
+      },
+    } as unknown as TxResponse);
+
+    const out = await service.finishEscrow({
+      submitter: mockWallet,
+      owner: 'rOwnerXXXXXXXXXXXXXXXXXXXXXXXXXX',
+      offerSequence: 99,
+    });
+
+    expect(out.txHash).toBe('C'.repeat(64));
+    expect(out.ledgerIndex).toBe(200);
+    const [tx] = mockSubmitAndWait.mock.calls[0] as [Record<string, unknown>];
+    expect(tx.TransactionType).toBe('EscrowFinish');
+    expect(tx.Owner).toBe('rOwnerXXXXXXXXXXXXXXXXXXXXXXXXXX');
+    expect(tx.OfferSequence).toBe(99);
+  });
+
+  it('submits EscrowCancel', async () => {
+    mockSubmitAndWait.mockResolvedValue({
+      result: {
+        hash: 'D'.repeat(64),
+        ledger_index: 201,
+        validated: true,
+        meta: { TransactionResult: 'tesSUCCESS', AffectedNodes: [] },
+      },
+    } as unknown as TxResponse);
+
+    const out = await service.cancelEscrow({
+      submitter: mockWallet,
+      owner: 'rOwnerXXXXXXXXXXXXXXXXXXXXXXXXXX',
+      offerSequence: 100,
+    });
+
+    expect(out.txHash).toBe('D'.repeat(64));
+    const [tx] = mockSubmitAndWait.mock.calls[0] as [Record<string, unknown>];
+    expect(tx.TransactionType).toBe('EscrowCancel');
+    expect(tx.OfferSequence).toBe(100);
   });
 });

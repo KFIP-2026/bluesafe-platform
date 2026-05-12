@@ -4,6 +4,7 @@ import { XrplModule } from '../xrpl/xrpl.module';
 import { Contract } from './contract.entity';
 import { ContractsController } from './contracts.controller';
 import { ContractsService } from './contracts.service';
+import { IouContractSetupService } from './iou-contract-setup.service';
 
 /**
  * 계약/PII 도메인 (W5).
@@ -17,7 +18,7 @@ import { ContractsService } from './contracts.service';
 @Module({
   imports: [TypeOrmModule.forFeature([Contract]), XrplModule],
   controllers: [ContractsController],
-  providers: [ContractsService],
+  providers: [ContractsService, IouContractSetupService],
   exports: [ContractsService],
 })
 export class ContractsModule {}

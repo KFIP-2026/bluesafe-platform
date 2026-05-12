@@ -84,6 +84,9 @@ describe('ContractsService.lockTenantDeposit (orchestration unit)', () => {
       landlordAddress: LANDLORD_ADDR,
       contractAccountAddress: null,
       contractAccountSeedCipher: null,
+      assetMode: 'XRP',
+      iouIssuer: null,
+      iouCurrency: null,
       depositAmount: '50000000',
       stakeAmount: '10000000',
       depositEscrowSequence: null,
@@ -98,6 +101,7 @@ describe('ContractsService.lockTenantDeposit (orchestration unit)', () => {
       cancelAfter,
       tenantPiiCipher: 'enc(tenant-secret)',
       landlordPiiCipher: 'enc(landlord-secret)',
+      tenantEmail: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     };

@@ -11,12 +11,23 @@ import { XrplClientService } from '../xrpl/xrpl-client.service';
 import { ContractStatus } from './contract-status.enum';
 import { ContractsController } from './contracts.controller';
 import { ContractsService, type ContractDto } from './contracts.service';
+import { IouContractSetupService } from './iou-contract-setup.service';
 import { CreateContractDto } from './dto/create-contract.dto';
 
 describe('ContractsController', () => {
   let controller: ContractsController;
   let contractsService: jest.Mocked<ContractsService>;
   let xrplClient: jest.Mocked<XrplClientService>;
+  const iouSetup: jest.Mocked<
+    Pick<
+      IouContractSetupService,
+      | 'assertCounterpartyTrustLines'
+      | 'ensureTrustLineAndFundFromOperator'
+    >
+  > = {
+    assertCounterpartyTrustLines: jest.fn().mockResolvedValue(undefined),
+    ensureTrustLineAndFundFromOperator: jest.fn().mockResolvedValue(undefined),
+  };
   const operatorWallet = Wallet.generate();
   const baseDto: ContractDto = {
     id: '11111111-1111-1111-1111-111111111111',
@@ -24,6 +35,9 @@ describe('ContractsController', () => {
     landlordAddress: 'rLandlordAaaaaaaaaaaaaaaaaaaaaaaaaa',
     contractAccountAddress: 'rContractAaaaaaaaaaaaaaaaaaaaaaaaaa',
     contractAccountSeed: 'sEdSeedSeedSeedSeedSeedSeedSeedSeed',
+    assetMode: 'XRP',
+    iouIssuer: null,
+    iouCurrency: null,
     depositAmount: '10000000',
     stakeAmount: '3000000',
     depositEscrowSequence: 100,
@@ -38,6 +52,7 @@ describe('ContractsController', () => {
     cancelAfter: new Date('2027-05-30'),
     tenantPii: 'PII-tenant',
     landlordPii: 'PII-landlord',
+    tenantEmail: null,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -64,6 +79,7 @@ describe('ContractsController', () => {
         { provide: ContractsService, useValue: contractsService },
         { provide: XrplClientService, useValue: xrplClient },
         { provide: ConfigService, useValue: cfg },
+        { provide: IouContractSetupService, useValue: iouSetup },
       ],
     }).compile();
     controller = mod.get(ContractsController);
@@ -103,6 +119,7 @@ describe('ContractsController', () => {
           provide: ConfigService,
           useValue: { get: jest.fn().mockReturnValue('') } as never,
         },
+        { provide: IouContractSetupService, useValue: iouSetup },
       ],
     }).compile();
     const c = mod.get(ContractsController);

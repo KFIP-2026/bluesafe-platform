@@ -2,6 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { SignerListSet, TxResponse, Wallet } from 'xrpl';
 import { XrplClientService } from './xrpl-client.service';
 
+/**
+ * 계약 계정 **멀티시그** — `SignerListSet`으로 임차인·임대인·운영(quorum) 구성.
+ * BlueSafe PoC: `ContractsService.lockTenantDeposit` 에서 3 signer / quorum 2 호출.
+ */
 export interface SignerSpec {
   /** signer 계정 classic address */
   account: string;

@@ -50,6 +50,15 @@ export class WalletService {
     };
   }
 
+  /** 동일 role에 대해 항상 같은 지갑 인스턴스 (fund-iou 등). */
+  getWalletForRole(role: WalletRole = 'tenant'): Wallet {
+    return this.getOrCreateWallet(role);
+  }
+
+  getNetworkLabel(): string {
+    return this.getWalletNetwork().label;
+  }
+
   private getOrCreateWallet(role: WalletRole) {
     const existing = this.wallets.get(role);
     if (existing) return existing;

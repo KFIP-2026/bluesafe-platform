@@ -76,6 +76,10 @@ export type CreateBe1ContractInput = {
   tenantPii: string
   landlordPii: string
   tenantEmail?: string
+  /** 기본 XRP(drops). IOU면 소수 value + 사전 trust line 필요 */
+  assetMode?: 'XRP' | 'IOU'
+  iouIssuer?: string
+  iouCurrency?: string
 }
 
 const be1Url = trimSlash(import.meta.env.VITE_BE1_URL)
@@ -246,6 +250,11 @@ export const bluesafeApi = {
   },
 
   getXrplBalance(contractId: string) {
-    return request<{ contractId: string; address: string; balanceXrp: string }>(be1Url, `/contracts/${contractId}/balance`)
+    return request<{
+      contractId: string
+      address: string
+      balanceXrp: string
+      balanceIou?: { currency: string; issuer: string; value: string } | null
+    }>(be1Url, `/contracts/${contractId}/balance`)
   },
 }
