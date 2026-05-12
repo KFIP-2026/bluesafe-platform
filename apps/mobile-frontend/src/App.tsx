@@ -69,28 +69,6 @@ type AppActions = {
 const deposit = 15_000_000
 const rent = 680_000
 const maintenance = 70_000
-const reputationScore = 97
-
-type ReputationStage = {
-  key: string
-  emoji: string
-  title: string
-  english: string
-  min: number
-  max: number
-  tone: string
-}
-
-const reputationStages: ReputationStage[] = [
-  { key: 'ocean', emoji: '🌊', title: '바다', english: 'Ocean', min: 99, max: 100, tone: 'ocean' },
-  { key: 'spring', emoji: '💧', title: '샘', english: 'Spring', min: 80, max: 98, tone: 'spring' },
-  { key: 'stream', emoji: '🏞️', title: '시내', english: 'Stream', min: 60, max: 79, tone: 'stream' },
-  { key: 'drop', emoji: '💦', title: '한 방울', english: 'Drop', min: 37, max: 59, tone: 'drop' },
-  { key: 'dew', emoji: '🫧', title: '이슬', english: 'Dewdrop', min: 20, max: 36, tone: 'dew' },
-  { key: 'drying', emoji: '🏜️', title: '마르는 중', english: 'Drying', min: 5, max: 19, tone: 'drying' },
-  { key: 'cracked', emoji: '🪨', title: '갈라짐', english: 'Cracked', min: 0, max: 4, tone: 'cracked' },
-]
-
 const tenantScreens: ScreenDef[] = [
   { id: 't01', label: '시작', group: '임차인', component: T01Entry },
   { id: 'role', label: '역할 선택', group: '임차인', component: RoleSelect },
@@ -751,37 +729,27 @@ function T11Report() {
   )
 }
 
-function T12Reputation({ next }: NavProps) {
-  const current = getReputationStage(reputationScore)
-  const nextStage = getNextReputationStage(reputationScore)
-  const progress = Math.max(0, Math.min(100, reputationScore))
+function T12Reputation({ next, app }: NavProps) {
+  const hasContract = Boolean(app.contract || app.xrplContract)
+  const hasEvidence = Boolean(app.evidence)
+  const hasDispute = Boolean(app.dispute)
 
   return (
     <Page>
-      <Hero title="평판이 차올라요" desc="꾸준히 살수록 차올라요. 다음 집에서 쓸 수 있어요." />
-      <div className={`reputation-card stage-${current.tone}`}>
-        <div className="stage-emoji" aria-hidden="true">{current.emoji}</div>
-        <img src={reputationMascot} alt="" className="reputation-mascot" />
-        <small>{current.english.toUpperCase()}</small>
-        <strong>지금은 {current.title}</strong>
-        <span>{reputationScore}점 · {nextStage ? `다음 ${nextStage.title}까지 +${nextStage.min - reputationScore}` : '최고 단계예요'}</span>
-        <div className="stage-meter"><i style={{ width: `${progress}%` }} /></div>
-      </div>
-      <SectionTitle>차오르는 단계</SectionTitle>
-      <div className="stage-list">
-        {reputationStages.map((stage) => (
-          <div className={stage.key === current.key ? 'active' : ''} key={stage.key}>
-            <span>{stage.emoji}</span>
-            <strong>{stage.title}<small>{stage.english}</small></strong>
-            <em>{stage.min}–{stage.max}</em>
-          </div>
-        ))}
-      </div>
-      <BottomCTA label="집 구하기 (오픈하우스)" secondary="공유" onClick={next} />
+      <Hero title="평판 데이터" desc="목업 등급 대신 실제 계약·증빙·분쟁 응답으로 계산할 준비만 해두었어요" />
+      <Card tone="soft">
+        <strong>아직 평판 등급이 없어요</strong>
+        <span>점수와 등급은 백엔드 평판 계산 API가 붙은 뒤에만 표시해요.</span>
+      </Card>
+      <SectionTitle>계산에 필요한 신호</SectionTitle>
+      <ListItem icon={<ReceiptIcon />} title="계약 이력" desc={hasContract ? '계약 응답이 있어요' : 'BE2 계약 응답 없음'} action={hasContract ? '확인' : '대기'} />
+      <ListItem icon={<ShieldIcon />} title="에스크로 이력" desc={app.xrplContract ? 'BE1 에스크로 응답이 있어요' : 'BE1 에스크로 응답 없음'} action={app.xrplContract ? '확인' : '대기'} />
+      <ListItem icon={<CheckIcon />} title="증빙 이력" desc={hasEvidence ? '증빙이 연결됐어요' : '증빙 없음'} action={hasEvidence ? '확인' : '대기'} />
+      <ListItem icon={<AlertIcon />} title="분쟁 이력" desc={hasDispute ? app.dispute?.status ?? '분쟁 응답 있음' : '분쟁 응답 없음'} action={hasDispute ? '확인' : '없음'} />
+      <BottomCTA label="홈으로" secondary="공유 준비 중" onClick={next} />
     </Page>
   )
 }
-
 function T13Bills({ go, app }: NavProps) {
   const hasEvidence = Boolean(app.evidence)
   const hasDispute = Boolean(app.dispute)
@@ -1307,16 +1275,6 @@ function pad2(value: number) {
 
 function formatDate(date: Date) {
   return `${date.getFullYear()}.${pad2(date.getMonth() + 1)}.${pad2(date.getDate())}`
-}
-
-function getReputationStage(score: number) {
-  return reputationStages.find((stage) => score >= stage.min && score <= stage.max) ?? reputationStages[reputationStages.length - 1]
-}
-
-function getNextReputationStage(score: number) {
-  return [...reputationStages]
-    .sort((a, b) => a.min - b.min)
-    .find((stage) => stage.min > score)
 }
 
 function isChromeLessScreen(id: ScreenId) {
