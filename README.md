@@ -55,6 +55,14 @@ npm run dev:be2
 npm run dev:frontend
 ```
 
+Docker Desktop 없이 내부지갑 생성만 먼저 확인하려면 BE1 대신 wallet-only 모드를 실행할 수 있습니다.
+
+```bash
+npm run dev:be1:wallet
+```
+
+이 모드는 `POST /api/wallet/connect`만 띄우며, 실제 XRPL 주소는 BE1의 `xrpl.Wallet.generate()`로 생성합니다. `POST /contracts` 기반 에스크로 생성은 전체 BE1 모드와 Postgres/Redis가 필요합니다.
+
 브라우저 접속:
 
 ```txt
