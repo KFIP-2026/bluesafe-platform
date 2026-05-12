@@ -57,6 +57,12 @@ type AppActions = {
   landlordApproveSettlement: () => Promise<void>
 }
 
+type TimelineItem = {
+  title: string
+  desc: string
+  state?: 'done' | 'pending' | 'blocked'
+}
+
 const ko = {
   start: '시작하기',
   next: '다음',
@@ -74,7 +80,6 @@ const ko = {
   revenue: '수익',
   all: '전체',
   waiting: '대기 중',
-  ready: '준비됨',
   complete: '완료',
   responseNone: '응답 없음',
   responseWaiting: '응답 대기',
@@ -327,7 +332,6 @@ const en: typeof ko = {
   revenue: 'Revenue',
   all: 'All',
   waiting: 'Waiting',
-  ready: 'Ready',
   complete: 'Complete',
   responseNone: 'No response',
   responseWaiting: 'Waiting for response',
@@ -578,7 +582,7 @@ const tenantScreens: ScreenDef[] = [
   { id: 't09', label: { ko: '홈', en: 'Home' }, group: 'tenant', tab: 'tenant', component: T09Home },
   { id: 't10', label: { ko: '자동 반환', en: 'Auto return' }, group: 'tenant', component: T10Countdown },
   { id: 't11', label: { ko: '안전 리포트', en: 'Safety report' }, group: 'tenant', component: T11Report },
-  { id: 't12', label: { ko: '평판', en: 'Reputation' }, group: 'tenant', component: T12Reputation },
+  { id: 't12', label: { ko: '내정보', en: 'Profile' }, group: 'tenant', component: T12Reputation },
   { id: 't13', label: { ko: '공과금', en: 'Utilities' }, group: 'tenant', component: T13Bills },
   { id: 't17', label: { ko: '퇴실 체크', en: 'Move-out' }, group: 'tenant', component: T17Moveout },
   { id: 't18', label: { ko: '반환 완료', en: 'Returned' }, group: 'tenant', component: T18Returned },
@@ -714,9 +718,8 @@ function App() {
           endsAt: contract.endsAt,
           finishAfter,
           cancelAfter,
-          tenantPii: 'tenant verified by BlueSafe',
-          landlordPii: 'landlord verified by BlueSafe',
-          tenantEmail: 'tenant@bluesafe.local',
+          tenantPii: app.tenantId,
+          landlordPii: app.landlordId,
         })
         const txHash = xrplContract.depositEscrowTxHash
         if (!txHash) throw new Error('BE1 did not return an escrow transaction hash')
@@ -877,9 +880,9 @@ function T05Invite({ next, lang }: NavProps) {
   return (
     <Page>
       <Hero title={c.inviteTitle} desc={c.inviteDesc} />
-      <Card tone="soft"><Info label={c.inviteLink} value="bluesafe.app/r/live-link-required" mono /><div className="chip-wrap"><span className="chip">{c.copy}</span><span className="chip">{c.kakao}</span><span className="chip">{c.sms}</span></div></Card>
+      <Card tone="soft"><Info label={c.inviteLink} value={c.responseNone} /><div className="chip-wrap"><span className="chip">{c.copy}</span><span className="chip">{c.kakao}</span><span className="chip">{c.sms}</span></div></Card>
       <SectionTitle>{c.landlordTodo}</SectionTitle>
-      <Timeline items={[`${c.inviteStep1}|${c.inviteStep1Desc}`, `${c.inviteStep2}|${c.inviteStep2Desc}`, `${c.inviteStep3}|${c.inviteStep3Desc}`]} />
+      <Timeline items={[{ title: c.inviteStep1, desc: c.inviteStep1Desc }, { title: c.inviteStep2, desc: c.inviteStep2Desc }, { title: c.inviteStep3, desc: c.inviteStep3Desc }]} />
       <BottomCTA label={c.sendKakao} secondary={c.later} onClick={next} />
     </Page>
   )
@@ -937,9 +940,9 @@ function T09Home({ go, app, error, lang }: NavProps) {
   const c = copy[lang]
   const contract = app.contract ?? app.xrplContract
   const metrics = getLeaseMetrics(app)
-  const deposit = contract?.depositAmount ?? '--'
-  const daysLeft = metrics ? `${metrics.daysLeft}` : '--'
-  const livedDays = metrics ? `${metrics.livedDays}${lang === 'ko' ? '일차' : ' days'}` : '--'
+  const deposit = contract?.depositAmount ?? c.responseNone
+  const daysLeft = metrics ? `${metrics.daysLeft}` : c.responseNone
+  const livedDays = metrics ? `${metrics.livedDays}${lang === 'ko' ? '일차' : ' days'}` : c.responseNone
   const txHash = app.xrplContract?.depositEscrowTxHash ?? app.contract?.depositEscrowTxHash
   const progressStyle = { '--progress': `${metrics?.progress ?? 0}%` } as CSSProperties
   return (
@@ -971,7 +974,19 @@ function T10Countdown({ app, actions, lang }: NavProps) {
   const left = metrics?.returnLeft
   const settlement = app.settlements[0]
   useEffect(() => { void actions.loadSettlements() }, [])
-  return <Page><Hero title={c.countdownTitle} desc={c.countdownDesc} /><div className="time-grid"><TimeBox value={left ? pad2(left.days) : '--'} label={c.day} /><TimeBox value={left ? pad2(left.hours) : '--'} label={c.hour} /><TimeBox value={left ? pad2(left.minutes) : '--'} label={c.minute} /></div><Card tone="blue"><strong>{c.noAction}</strong><span>{finishAfter ? `${formatDate(finishAfter)} ${c.returnPrepDesc}` : c.noActionDesc}</span></Card><SectionTitle>{c.progress}</SectionTitle><Timeline items={settlement ? [`${c.settlementResponse}|${statusText(settlement.status, lang)}`, `${c.returnPrep}|${settlement.id}`] : [`${c.period}|${dateRange(app.contract?.startsAt, app.contract?.endsAt, lang)}`, `${c.tx}|${app.xrplContract?.depositEscrowTxHash ? shortHash(app.xrplContract.depositEscrowTxHash) : c.responseNone}`, `${c.settlementStatus}|${c.responseNone}`]} /></Page>
+  const hasContractDates = Boolean(app.contract?.startsAt && app.contract?.endsAt)
+  const hasTx = Boolean(app.xrplContract?.depositEscrowTxHash)
+  const progressItems: TimelineItem[] = settlement
+    ? [
+        { title: c.settlementResponse, desc: statusText(settlement.status, lang), state: 'done' },
+        { title: c.returnPrep, desc: settlement.id, state: 'pending' },
+      ]
+    : [
+        { title: c.period, desc: dateRange(app.contract?.startsAt, app.contract?.endsAt, lang), state: hasContractDates ? 'done' : 'pending' },
+        { title: c.tx, desc: hasTx ? shortHash(app.xrplContract!.depositEscrowTxHash!) : c.responseNone, state: hasTx ? 'done' : 'pending' },
+        { title: c.settlementStatus, desc: c.responseNone, state: 'pending' },
+      ]
+  return <Page><Hero title={c.countdownTitle} desc={c.countdownDesc} /><div className="time-grid"><TimeBox value={left ? pad2(left.days) : c.responseNone} label={c.day} /><TimeBox value={left ? pad2(left.hours) : c.responseNone} label={c.hour} /><TimeBox value={left ? pad2(left.minutes) : c.responseNone} label={c.minute} /></div><Card tone="blue"><strong>{finishAfter ? c.noAction : c.contractWaiting}</strong><span>{finishAfter ? `${formatDate(finishAfter)} ${c.returnPrepDesc}` : c.noActionDesc}</span></Card><SectionTitle>{c.progress}</SectionTitle><Timeline items={progressItems} /></Page>
 }
 
 function T11Report({ app, lang }: NavProps) {
@@ -1135,8 +1150,8 @@ function VaultDiagram({ lang }: { lang: Lang }) {
 
 function ExamplePanel({ kind, lang }: { kind: 'return' | 'bills' | 'proof'; lang: Lang }) {
   const c = copy[lang]
-  if (kind === 'return') return <div className="example-panel"><div className="example-calendar"><span>{c.autoReturn}</span><strong>{c.waiting}</strong><small>{c.countdownDesc}</small></div><div className="example-chip">D-</div></div>
-  if (kind === 'bills') return <div className="example-panel list-preview"><div><CheckIcon /><span>{c.utilityTitle}</span><b>{c.utilityDisabled}</b></div><div><ReceiptIcon /><span>{c.contract}</span><b>{c.ready}</b></div><div><CheckIcon /><span>{c.settlement}</span><b>{c.waiting}</b></div></div>
+  if (kind === 'return') return <div className="example-panel"><div className="example-calendar"><span>{c.autoReturn}</span><strong>{c.waiting}</strong><small>{c.countdownDesc}</small></div><div className="example-chip">{c.responseWaiting}</div></div>
+  if (kind === 'bills') return <div className="example-panel list-preview"><div><CheckIcon /><span>{c.utilityTitle}</span><b>{c.utilityDisabled}</b></div><div><ReceiptIcon /><span>{c.contract}</span><b>{c.waiting}</b></div><div><CheckIcon /><span>{c.settlement}</span><b>{c.waiting}</b></div></div>
   return <div className="example-panel proof-preview"><div><span>{c.tx}</span><strong>{c.waiting}</strong><small>{c.receiptDesc}</small></div><ShieldIcon /></div>
 }
 
@@ -1148,8 +1163,11 @@ function StepperHeader({ current }: { current: number }) {
   return <div className="stepper-head">{[0, 1, 2].map((n) => <span key={n} className={n <= current ? 'active' : ''}>{n + 1}</span>)}</div>
 }
 
-function Timeline({ items }: { items: string[] }) {
-  return <Card tone="soft">{items.map((raw, i) => { const [title, desc] = raw.split('|'); return <div className="step-row" key={`${title}-${i}`}><span className={i < 2 ? 'done' : ''}>{i < 2 ? <CheckIcon /> : i + 1}</span><div><strong>{title}</strong><small>{desc}</small></div></div> })}</Card>
+function Timeline({ items }: { items: TimelineItem[] }) {
+  return <Card tone="soft">{items.map((item, i) => {
+    const done = item.state === 'done'
+    return <div className="step-row" key={`${item.title}-${i}`}><span className={done ? 'done' : ''}>{done ? <CheckIcon /> : i + 1}</span><div><strong>{item.title}</strong><small>{item.desc}</small></div></div>
+  })}</Card>
 }
 
 function ActivityRows({ rows }: { rows: string[][] }) {
