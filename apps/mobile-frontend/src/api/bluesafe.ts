@@ -108,13 +108,24 @@ async function request<T>(baseUrl: string, path: string, init?: RequestInit): Pr
 
   const response = await fetch(`${baseUrl}${path}`, { ...init, headers })
   const text = await response.text()
-  const data = text ? JSON.parse(text) : null
+  const data = parseResponseBody(text)
 
   if (!response.ok) {
-    const message = data?.message || data?.errorCode || `${response.status} ${response.statusText}`
+    const message = typeof data === 'string'
+      ? data
+      : data?.message || data?.errorCode || `${response.status} ${response.statusText}`
     throw new Error(message)
   }
   return data as T
+}
+
+function parseResponseBody(text: string) {
+  if (!text) return null
+  try {
+    return JSON.parse(text)
+  } catch {
+    return text
+  }
 }
 
 export const bluesafeApi = {

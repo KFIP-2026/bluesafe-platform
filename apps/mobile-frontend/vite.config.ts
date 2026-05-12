@@ -7,6 +7,9 @@ export default defineConfig({
   server: {
     proxy: {
       '/api/wallet': 'http://localhost:3000',
+      '/contracts': 'http://localhost:3000',
+      '/v1': 'http://localhost:3100',
+      '/health': 'http://localhost:3100',
     },
   },
 })

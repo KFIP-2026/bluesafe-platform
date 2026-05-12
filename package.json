@@ -11,11 +11,14 @@
   ],
   "scripts": {
     "dev:frontend": "npm --workspace apps/mobile-frontend run dev -- --host 127.0.0.1 --port 5179",
-    "dev:be1": "npm --workspace services/be1-xrpl run start:dev",
-    "dev:be2": "npm --workspace services/be2-ops run dev",
+    "dev:be1": "cross-env PORT=3000 npm --workspace services/be1-xrpl run start:dev",
+    "dev:be2": "cross-env PORT=3100 npm --workspace services/be2-ops run dev",
     "build:frontend": "npm --workspace apps/mobile-frontend run build",
     "build:be1": "npm --workspace services/be1-xrpl run build",
     "build:be2": "npm --workspace services/be2-ops run build",
     "build:xrpl-core": "npm --workspace packages/xrpl-core run build"
+  },
+  "devDependencies": {
+    "cross-env": "^10.1.0"
   }
 }

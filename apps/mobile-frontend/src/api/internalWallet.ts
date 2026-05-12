@@ -35,18 +35,29 @@ async function walletRequest<T>(path: string, init?: RequestInit) {
     headers: { 'Content-Type': 'application/json', ...init?.headers },
     ...init,
   })
+  const text = await response.text()
+  const data = parseResponseBody(text)
 
   if (!response.ok) {
-    const message = await response.text().catch(() => '')
-    throw new Error(message || `내부지갑 API 요청 실패 (${response.status})`)
+    const message = typeof data === 'string' ? data : data?.message || data?.error || ''
+    throw new Error(message || `Wallet API request failed (${response.status})`)
   }
 
-  return response.json() as Promise<T>
+  return data as T
+}
+
+function parseResponseBody(text: string) {
+  if (!text) return null
+  try {
+    return JSON.parse(text)
+  } catch {
+    return text
+  }
 }
 
 function normalizeWallet(data: WalletConnectResponse): InternalWalletSession {
   const account = data.address || data.account || data.classicAddress || data.wallet?.address || data.wallet?.account || data.wallet?.classicAddress
-  if (!account) throw new Error('내부지갑 API 응답에 XRPL 주소가 없어요.')
+  if (!account) throw new Error('Wallet API response did not include an XRPL address')
 
   return {
     account,
