@@ -62,9 +62,6 @@ type AppActions = {
   }) => Promise<EvidenceFile>
 }
 
-const deposit = 15_000_000
-const rent = 680_000
-const maintenance = 70_000
 const tenantScreens: ScreenDef[] = [
   { id: 't01', label: '시작', group: '임차인', component: T01Entry },
   { id: 'role', label: '역할 선택', group: '임차인', component: RoleSelect },
@@ -199,16 +196,22 @@ function App() {
 
         if (!backendConfig.hasBe1) throw new Error('BE1 URL is not configured')
         if (!app.tenantAddress || !app.landlordAddress) throw new Error('Tenant and landlord wallet addresses are required')
+        if (!contract.depositAmount || !contract.stakeAmount) throw new Error('Contract depositAmount and stakeAmount are required')
+        if (!contract.startsAt || !contract.endsAt) throw new Error('Contract startsAt and endsAt are required')
+        const endsAt = new Date(contract.endsAt)
+        if (Number.isNaN(endsAt.getTime())) throw new Error('Contract endsAt is invalid')
+        const finishAfter = addDays(endsAt, 7).toISOString()
+        const cancelAfter = addDays(endsAt, 30).toISOString()
 
         const xrplContract = await bluesafeApi.createXrplContract({
           tenantAddress: app.tenantAddress,
           landlordAddress: app.landlordAddress,
-          depositAmount: '17647000000',
-          stakeAmount: '1000000',
-          startsAt: '2026-06-01T00:00:00.000Z',
-          endsAt: '2027-05-31T00:00:00.000Z',
-          finishAfter: '2027-06-07T00:00:00.000Z',
-          cancelAfter: '2027-06-30T00:00:00.000Z',
+          depositAmount: contract.depositAmount,
+          stakeAmount: contract.stakeAmount,
+          startsAt: contract.startsAt,
+          endsAt: contract.endsAt,
+          finishAfter,
+          cancelAfter,
           tenantPii: 'tenant verified by BlueSafe',
           landlordPii: 'landlord verified by BlueSafe',
           tenantEmail: 'tenant@bluesafe.local',
@@ -505,46 +508,18 @@ function T05Invite({ next }: NavProps) {
   )
 }
 
-function T06Contract({ next, actions, busy, error }: NavProps) {
+function T06Contract({ next, actions, busy, error, app }: NavProps) {
   const [open, setOpen] = useState(false)
   const signContract = async () => {
     try {
       await actions.createDraftContract()
-      await actions.uploadEvidence({
-        category: 'contract_pdf',
-        fileName: 'bluesafe-trust-lease.txt',
-        content: 'BLUESAFE TRUST LEASE v1 signed by tenant, landlord, and BlueSafe.',
-      })
       setOpen(true)
     } catch {
       return
     }
   }
-  return (
-    <Page>
-      <Hero eyebrow="검토 중" title="3자 안심 계약서" desc="집주인·BlueSafe·임차인 모두가 서명해요" />
-      <Card tone="soft">
-        <p className="doc-label">BLUESAFE TRUST LEASE · v1</p>
-        <Info label="주소" value="서울시 마포구 망원동 12-3, 302호" />
-        <Info label="계약 기간" value="2026.06.01 — 2027.05.31" />
-        <Info label="월세" value={krw(rent)} />
-        <Info label="보증금" value={krw(deposit)} strong />
-        <Info label="관리비" value="월 70,000원 (수도·인터넷 포함)" />
-      </Card>
-      <SectionTitle>안심 조항 3가지</SectionTitle>
-      <ListItem icon="§1" title="보증금은 XRPL 에스크로에 잠겨요" desc="계약 기간엔 양쪽 모두 못 꺼내요" />
-      <ListItem icon="§2" title="퇴실 후 7일 이내 자동 반환돼요" desc="집주인 응답이 없어도 풀려요" />
-      <ListItem icon="§3" title="퇴실 후 자동 반환 절차가 시작돼요" desc="계약 조건에 따라 반환돼요" />
-      <label className="agree-row"><input type="checkbox" defaultChecked /> 전체 약관에 동의해요</label>
-      <BackendInline error={error} />
-      <BottomCTA label={busy ? '계약 저장 중' : '서명하고 계속'} onClick={signContract} />
-      <ActionModal open={open} title="계약서 증빙 저장" onClose={() => setOpen(false)} primaryLabel="계속" onPrimary={next}>
-        <p>계약 draft를 만들고 계약서 증빙을 BE2 Evidence Vault에 연결하는 흐름이에요.</p>
-      </ActionModal>
-    </Page>
-  )
+  return <Page><Hero title="Contract check" desc="Only BE2 contract response is shown. No fixed lease terms." /><Card tone="soft"><Info label="Contract ID" value={app.contract?.id ?? 'No response'} mono={Boolean(app.contract?.id)} /><Info label="Status" value={app.contract?.status ?? 'No response'} /><Info label="Deposit" value={app.contract?.depositAmount ?? 'No amount response'} /><Info label="Start" value={app.contract?.startsAt ? formatDate(new Date(app.contract.startsAt)) : 'No date response'} /><Info label="End" value={app.contract?.endsAt ? formatDate(new Date(app.contract.endsAt)) : 'No date response'} /></Card><SectionTitle>Required data</SectionTitle><ListItem icon={<ReceiptIcon />} title="Contract terms" desc={app.contract ? 'BE2 contract response exists' : 'No BE2 contract response'} action={app.contract ? 'OK' : 'Waiting'} /><ListItem icon={<WalletIcon />} title="Escrow inputs" desc={app.contract?.depositAmount && app.contract?.startsAt && app.contract?.endsAt ? 'Ready' : 'Amount and dates required'} action="BE1" /><BackendInline error={error} /><BottomCTA label={busy ? 'Creating contract' : 'Create contract'} onClick={signContract} /><ActionModal open={open} title="Contract created" onClose={() => setOpen(false)} primaryLabel="Continue" onPrimary={next}><p>BE2 contract response was saved. Amount and dates are required before creating XRPL escrow.</p></ActionModal></Page>
 }
-
 function T07Pay({ next, actions, busy, error, app }: NavProps) {
   const hasTenantWallet = Boolean(app.tenantAddress)
   const hasLandlordWallet = Boolean(app.landlordAddress)
@@ -672,60 +647,21 @@ function T10Countdown({ app, actions }: NavProps) {
   )
 }
 
-function T11Report() {
-  return (
-    <Page>
-      <Hero title="8월 안전 리포트" desc="2026.08 · BlueSafe Trust" />
-      <div className="report-summary">
-        <div className="score-card"><span>안전 점수</span><strong>97</strong><p>/ 100</p></div>
-        <div className="score-delta"><span>지난달보다</span><strong>+3 ↑</strong><p>좋아졌어요</p></div>
-      </div>
-      <SectionTitle>항목별 점수</SectionTitle>
-      <InfoList rows={[['월세 정시 납부', '6/6'], ['공과금 적정성', '평균 대비 +12%'], ['집주인 응답성', '평균 4시간'], ['문서 보관', '모두 완료']]} />
-    </Page>
-  )
+function T11Report({ app }: NavProps) {
+  const hasContract = Boolean(app.contract || app.xrplContract)
+  const hasEvidence = Boolean(app.evidence)
+  const hasSettlement = app.settlements.length > 0
+  return <Page><Hero title="Safety report" desc="No fixed score is shown. Only live backend signals are listed." /><Card tone="soft"><strong>No report score yet</strong><span>A backend scoring API is required before score and delta can be displayed.</span></Card><SectionTitle>Signals</SectionTitle><ListItem icon={<ReceiptIcon />} title="Contract" desc={hasContract ? app.contract?.status ?? app.xrplContract?.status ?? 'Response exists' : 'No response'} action={hasContract ? 'OK' : 'Waiting'} /><ListItem icon={<CheckIcon />} title="Evidence" desc={hasEvidence ? app.evidence?.id ?? 'Response exists' : 'No response'} action={hasEvidence ? 'OK' : 'Waiting'} /><ListItem icon={<WalletIcon />} title="Settlement" desc={hasSettlement ? app.settlements[0]?.status ?? 'Response exists' : 'No response'} action={hasSettlement ? 'OK' : 'Waiting'} /></Page>
 }
-
 function T12Reputation({ next, app }: NavProps) {
   const hasContract = Boolean(app.contract || app.xrplContract)
   const hasEvidence = Boolean(app.evidence)
-
-  return (
-    <Page>
-      <Hero title="평판 데이터" desc="목업 등급 대신 실제 계약·증빙 응답으로 계산할 준비만 해두었어요" />
-      <Card tone="soft">
-        <strong>아직 평판 등급이 없어요</strong>
-        <span>점수와 등급은 백엔드 평판 계산 API가 붙은 뒤에만 표시해요.</span>
-      </Card>
-      <SectionTitle>계산에 필요한 신호</SectionTitle>
-      <ListItem icon={<ReceiptIcon />} title="계약 이력" desc={hasContract ? '계약 응답이 있어요' : 'BE2 계약 응답 없음'} action={hasContract ? '확인' : '대기'} />
-      <ListItem icon={<ShieldIcon />} title="에스크로 이력" desc={app.xrplContract ? 'BE1 에스크로 응답이 있어요' : 'BE1 에스크로 응답 없음'} action={app.xrplContract ? '확인' : '대기'} />
-      <ListItem icon={<CheckIcon />} title="증빙 이력" desc={hasEvidence ? '증빙이 연결됐어요' : '증빙 없음'} action={hasEvidence ? '확인' : '대기'} />
-      <BottomCTA label="홈으로" secondary="공유 준비 중" onClick={next} />
-    </Page>
-  )
+  return <Page><Hero title="Reputation data" desc="No fixed grade is shown. Backend reputation scoring is required." /><Card tone="soft"><strong>No reputation grade yet</strong><span>Score and grade will appear only after the backend scoring API is connected.</span></Card><SectionTitle>Required signals</SectionTitle><ListItem icon={<ReceiptIcon />} title="Contract history" desc={hasContract ? 'Contract response exists' : 'No BE2 contract response'} action={hasContract ? 'OK' : 'Waiting'} /><ListItem icon={<ShieldIcon />} title="Escrow history" desc={app.xrplContract ? 'BE1 escrow response exists' : 'No BE1 escrow response'} action={app.xrplContract ? 'OK' : 'Waiting'} /><ListItem icon={<CheckIcon />} title="Evidence history" desc={hasEvidence ? 'Evidence connected' : 'No evidence'} action={hasEvidence ? 'OK' : 'Waiting'} /><BottomCTA label="Home" secondary="Share disabled" onClick={next} /></Page>
 }
 function T13Bills({ go, app }: NavProps) {
   const hasEvidence = Boolean(app.evidence)
-  return (
-    <Page bottomNav>
-      <Hero title="공과금 확인" desc="공과금은 증빙 업로드와 BE2 evidence 응답만 표시해요" />
-      <div className="total-bill">
-        <span>증빙 상태</span>
-        <strong>{hasEvidence ? '증빙 등록됨' : '증빙 없음'}</strong>
-        <p>{hasEvidence ? 'evidence: ' + app.evidence?.id : '아직 백엔드에 등록된 공과금 증빙이 없어요.'}</p>
-      </div>
-      <SectionTitle>연동 항목</SectionTitle>
-      <ListItem icon={<ReceiptIcon />} title="공과금 증빙" desc={hasEvidence ? app.evidence?.category ?? '카테고리 응답 없음' : '업로드된 증빙 없음'} action={hasEvidence ? '등록' : '대기'} />
-      <Card tone={hasEvidence ? 'blue' : 'soft'}>
-        <strong>{hasEvidence ? '백엔드 응답을 불러왔어요' : '실제 증빙이 필요해요'}</strong>
-        <span>청구액과 항목별 금액은 OCR 또는 BE2 evidence API 응답이 생긴 뒤 표시하는 흐름으로 두었어요.</span>
-      </Card>
-      <BottomCTA label={hasEvidence ? '확인' : '증빙 업로드로 이동'} secondary="나중에" onClick={() => go(hasEvidence ? 't09' : 't14')} />
-    </Page>
-  )
+  return <Page bottomNav><Hero title="Utility evidence" desc="Only BE2 evidence response is shown. No fixed bill amount." /><div className="total-bill"><span>Evidence status</span><strong>{hasEvidence ? 'Evidence uploaded' : 'No evidence'}</strong><p>{hasEvidence ? 'evidence: ' + app.evidence?.id : 'No utility evidence has been registered in backend yet.'}</p></div><SectionTitle>Linked data</SectionTitle><ListItem icon={<ReceiptIcon />} title="Utility evidence" desc={hasEvidence ? app.evidence?.category ?? 'No category response' : 'No uploaded evidence'} action={hasEvidence ? 'OK' : 'Waiting'} /><Card tone={hasEvidence ? 'blue' : 'soft'}><strong>{hasEvidence ? 'Backend response loaded' : 'Real evidence required'}</strong><span>Bill amount and line items should appear only after OCR or BE2 evidence response is available.</span></Card><BottomCTA label={hasEvidence ? 'Confirm' : 'Upload evidence'} secondary="Later" onClick={() => go(hasEvidence ? 't09' : 't14')} /></Page>
 }
-
 function T14EvidenceUpload({ next, actions, busy, error }: NavProps) {
   const [file, setFile] = useState<File>()
   const onFile = (event: ChangeEvent<HTMLInputElement>) => {
@@ -733,62 +669,21 @@ function T14EvidenceUpload({ next, actions, busy, error }: NavProps) {
     if (!selected) return
     setFile(selected)
   }
-
-  return (
-    <Page>
-      <Hero title="공과금 증빙 업로드" desc="금액은 목업으로 넣지 않고, 실제 BE2 evidence 응답만 표시해요" />
-      <SectionTitle>증빙 파일</SectionTitle>
-      <input className="hidden-input" id="utility-evidence-file" type="file" accept="image/png,image/jpeg,application/pdf" onChange={onFile} />
-      <div className="photo-grid evidence-grid">
-        <div>{file ? file.name : '선택된 파일 없음'}</div>
-        <div />
-        <button onClick={() => document.getElementById('utility-evidence-file')?.click()}>+</button>
-      </div>
-      <Card tone="soft">
-        <strong>업로드 후 표시되는 값</strong>
-        <span>BE2 evidence ID, category, CID가 응답으로 돌아오면 공과금 화면에 연결돼요.</span>
-      </Card>
-      <BackendInline error={error} />
-      <BottomCTA label={busy ? '증빙 업로드 중' : '증빙 업로드'} secondary="취소" onClick={async () => { try { await actions.uploadEvidence({ category: 'utility_bill', fileName: file?.name ?? 'utility-bill', file, content: 'utility bill evidence uploaded from frontend' }); next() } catch { return } }} />
-    </Page>
-  )
+  return <Page><Hero title="Upload utility evidence" desc="No fixed amount is inserted. Only BE2 evidence response is shown." /><SectionTitle>Evidence file</SectionTitle><input className="hidden-input" id="utility-evidence-file" type="file" accept="image/png,image/jpeg,application/pdf" onChange={onFile} /><div className="photo-grid evidence-grid"><div>{file ? file.name : 'No file selected'}</div><div /><button onClick={() => document.getElementById('utility-evidence-file')?.click()}>+</button></div><Card tone="soft"><strong>Displayed after upload</strong><span>BE2 evidence ID, category, and CID will be linked back to the utility screen.</span></Card><BackendInline error={error} /><BottomCTA label={busy ? 'Uploading evidence' : 'Upload evidence'} secondary="Cancel" onClick={async () => { try { await actions.uploadEvidence({ category: 'utility_bill', fileName: file?.name ?? 'utility-bill', file, content: 'utility bill evidence uploaded from frontend' }); next() } catch { return } }} /></Page>
 }
-function T17Moveout({ next }: NavProps) {
-  return (
-    <Page>
-      <Hero title="퇴실 체크리스트" desc="4가지를 마치면 자동 반환이 시작돼요" />
-      <ListItem icon={<CheckIcon />} title="집 상태 사진 찍기" desc="거실·주방·욕실·방" action="완료" />
-      <ListItem icon={<CheckIcon />} title="공과금 정산" desc="8월분까지 완료" action="완료" />
-      <ListItem icon={<CheckIcon />} title="열쇠 반납 확인" desc="카카오톡 답변 받음" action="완료" />
-      <ListItem icon="4" title="집주인 최종 확인 요청" desc="아직" action="필요" />
-      <Card tone="blue"><strong>체크 끝나면 어떻게 돼요?</strong><span>퇴실 체크와 정산 확인이 끝나면 보증금 반환 절차가 시작돼요.</span></Card>
-      <BottomCTA label="집주인 확인 요청" onClick={next} />
-    </Page>
-  )
+function T17Moveout({ next, app }: NavProps) {
+  const hasEvidence = Boolean(app.evidence)
+  const hasSettlement = app.settlements.length > 0
+  return <Page><Hero title="Move-out checklist" desc="No fixed completed state is shown. Only evidence and settlement responses are checked." /><ListItem icon={<CheckIcon />} title="Home condition evidence" desc={hasEvidence ? app.evidence?.id ?? 'Evidence response exists' : 'No evidence response'} action={hasEvidence ? 'OK' : 'Waiting'} /><ListItem icon={<WalletIcon />} title="Settlement response" desc={hasSettlement ? app.settlements[0]?.status ?? 'Settlement response exists' : 'No settlement response'} action={hasSettlement ? 'OK' : 'Waiting'} /><Card tone="soft"><strong>Return preparation</strong><span>Deposit return flow will appear after BE2 settlement response exists.</span></Card><BottomCTA label="Check settlement" onClick={next} /></Page>
 }
-
-function T18Returned({ next }: NavProps) {
-  return (
-    <Page>
-      <div className="success-block"><div className="success-icon"><CheckIcon /></div><h1>보증금이 돌아왔어요</h1><strong className="big-money">{krw(deposit)}</strong><p>토스뱅크 ••• 8821로 입금됐어요</p></div>
-      <Card><p className="doc-label">SETTLEMENT</p><Info label="원래 보증금" value={krw(deposit)} /><Info label="청소 차감" value={`−${krw(50_000)}`} /><Info label="최종 입금" value={krw(14_950_000)} strong /></Card>
-      <BottomCTA label="본국으로 송금" secondary="영수증" onClick={next} />
-    </Page>
-  )
+function T18Returned({ next, app }: NavProps) {
+  const settlement = app.settlements[0]
+  return <Page><Hero title="Deposit return" desc="Return amount is shown only from actual settlement response." />{settlement ? <Card><Info label="Settlement ID" value={settlement.id} mono /><Info label="Status" value={settlement.status} /><Info label="Amount" value={settlement.amountMinor ? krw(settlement.amountMinor) : 'No amount response'} strong /></Card> : <Card tone="soft"><strong>No return data</strong><span>BE2 settlement response is required.</span></Card>}<BottomCTA label="Prepare remittance" secondary="Receipt" onClick={next} /></Page>
 }
-
-function T19Fx({ next }: NavProps) {
-  return (
-    <Page>
-      <Hero eyebrow="저렴한 환율" title={'본국으로\n송금하기'} />
-      <Card tone="soft"><Info label="보낼 금액" value={krw(14_950_000)} strong /><Info label="받는 금액 (USD)" value="$11,145.98" strong /><p className="notice inside">1 USD = 1,341.30 KRW · XRPL 브릿지 사용</p></Card>
-      <SectionTitle>받는 사람</SectionTitle><ListItem icon={<UserIcon />} title="John Park" desc="Bank of America · ••• 4421" action="USA" /><ListItem icon={<PlusIcon />} title="다른 받는 사람 추가" />
-      <Card tone="blue"><strong>시중 은행 대비 절약</strong><span>+ ₩42,300</span></Card>
-      <BottomCTA label="확인하고 송금" onClick={next} />
-    </Page>
-  )
+function T19Fx({ next, app }: NavProps) {
+  const settlement = app.settlements[0]
+  return <Page><Hero title="International remittance" desc="Recipient and FX quote appear only after remittance API is connected." /><Card tone="soft"><strong>{settlement ? 'Settlement amount found' : 'No remittance data'}</strong><span>{settlement?.amountMinor ? krw(settlement.amountMinor) : 'Deposit settlement response is required first.'}</span></Card><SectionTitle>Required integration</SectionTitle><ListItem icon={<WalletIcon />} title="Settlement amount" desc={settlement ? settlement.status : 'No BE2 settlement response'} action={settlement ? 'OK' : 'Waiting'} /><ListItem icon={<UserIcon />} title="Recipient" desc="No remittance API response" action="Waiting" /><BottomCTA label="Confirm" onClick={next} /></Page>
 }
-
 function T20Activity({ next, app }: NavProps) {
   const rows: string[][] = []
   const today = formatDate(new Date()).slice(5).replace('-', '.')
@@ -815,125 +710,55 @@ function T20Activity({ next, app }: NavProps) {
     </Page>
   )
 }
-function L01Invited({ next }: NavProps) {
-  return (
-    <Page>
-      <div className="home-head"><span>BlueSafe</span></div>
-      <Hero title={'안심 임대로\n시작해 볼래요?'} desc="망원동 12-3, 302호 보증금 1,500만원" />
-      <ListItem icon={<ShieldIcon />} title="먹튀 걱정 없는 임차인" desc="월세 미납 시 BlueSafe가 잠긴 보증금에서 우선 차감해서 송금해요." />
-      <ListItem icon={<WalletIcon />} title="월세 자동 정산" desc="매달 1일 자동으로 토스 계좌에 들어와요. 챙길 필요 없어요." />
-      <ListItem icon={<ReceiptIcon />} title="깨끗한 거래 기록" desc="입출금·계약·정산이 한 화면. 종소세 신고 자료까지." />
-      <BottomCTA label="계약서 보기" secondary="나중에" onClick={next} />
-    </Page>
-  )
+function L01Invited({ next, app }: NavProps) {
+  return <Page><div className="home-head"><span>BlueSafe</span></div><Hero title="Start as landlord" desc="Actual contract data is shown only from invite or BE2 contract response." /><Card tone="soft"><strong>{app.contract ? 'Contract response found' : 'No invite data'}</strong><span>{app.contract?.id ?? 'BE2 contract or invite API response is required.'}</span></Card><BottomCTA label="View contract" secondary="Later" onClick={next} /></Page>
 }
-
 function L02Verify({ next }: NavProps) {
   const [open, setOpen] = useState(false)
   return <Page><StepperHeader current={0} /><Hero title={'임대인\n인증 종류'} desc="월세 받을 명의를 선택해요" /><ListItem icon="개인" title="개인" desc="주민등록증 본인 명의" /><ListItem icon="사업" title="개인사업자" desc="사업자등록증 + 본인 명의" /><ListItem icon="법인" title="법인" desc="법인 인감 + 대표자 인증" /><p className="notice">월세 수령 계좌는 본인 명의여야 해요. BlueSafe가 자동으로 검증해요.</p><BottomCTA label="토스로 인증하기" onClick={() => setOpen(true)} /><ActionModal open={open} title="임대인 인증 준비 완료" onClose={() => setOpen(false)} primaryLabel="다음" onPrimary={next}><p>실제 Toss/OIDC 토큰이 연결되면 BE2 요청의 landlord role 토큰으로 사용해요.</p><Info label="role" value="landlord" /><Info label="auth" value="ready" /></ActionModal></Page>
 }
 
-function L03Property({ next }: NavProps) {
-  return <Page><Hero title="매물 정보" desc="계약서가 자동으로 채워져요" /><div className="photo-banner">[ 매물 사진 4장 ]<span>1/4</span></div><Card tone="soft"><Info label="주소" value="서울시 마포구 망원동 12-3, 302호" /><Info label="면적" value="32㎡ (9.7평)" /><Info label="구조" value="원룸 · 풀옵션" /><Info label="월세" value={`${krw(rent)} / 월`} /><Info label="보증금" value={krw(deposit)} strong /><Info label="관리비" value={`${krw(maintenance)} / 월`} /><Info label="입주 가능일" value="2026.06.01" /></Card><BottomCTA label="계약서 자동 작성" onClick={next} /></Page>
+function L03Property({ next, app }: NavProps) {
+  return <Page><Hero title="Property data" desc="Address and contract terms require a real property API response." /><Card tone="soft"><strong>No property data</strong><span>{app.contract?.id ? 'Contract ID: ' + app.contract.id : 'BE2 property response is required.'}</span></Card><BottomCTA label="Review contract" onClick={next} /></Page>
 }
-
-function L04Review({ next, actions, busy, error }: NavProps) {
+function L04Review({ next, actions, busy, error, app }: NavProps) {
   const [open, setOpen] = useState(false)
   const sign = async () => {
-    try {
-      await actions.landlordSignContract()
-      setOpen(true)
-    } catch {
-      return
-    }
+    try { await actions.landlordSignContract(); setOpen(true) } catch { return }
   }
-  return <Page><Hero eyebrow="검토 중" title="계약서 확인" desc="필요하면 임차인에게 수정 요청을 보낼 수 있어요" /><Card tone="soft"><p className="doc-label">BLUESAFE TRUST LEASE v1</p><Info label="임차인" value="Sarah Kim" /><Info label="국적" value="USA · F-2" /><Info label="계약 기간" value="12 mo" /><Info label="월세" value={krw(rent)} /><Info label="보증금" value={krw(deposit)} strong /><Info label="입주" value="2026.06.01" /></Card><SectionTitle>집주인 보호 조항</SectionTitle><ListItem icon={<WalletIcon />} title="월세 미납 시 자동 차감" desc="잠긴 보증금에서 월세분 우선 송금" /><ListItem icon={<ReceiptIcon />} title="원상복구 청구" desc="퇴실 시 손상분 차감 가능" /><ListItem icon={<ClockIcon />} title="조기 해지 페널티" desc="6개월 미만 — 1개월분" /><BackendInline error={error} /><BottomCTA label={busy ? '서명 저장 중' : '동의하고 서명'} secondary="수정 요청" onClick={sign} /><ActionModal open={open} title="계약 동의 저장 완료" onClose={() => setOpen(false)} primaryLabel="계속" onPrimary={next}><p>BE2 계약 상태를 다음 단계로 업데이트했어요. 이후 임차인의 안전 송금이 완료되면 escrow anchor가 연결됩니다.</p></ActionModal></Page>
+  return <Page><Hero title="Review contract" desc="Only BE2 contract response is used for landlord signing." /><Card tone="soft"><Info label="Contract ID" value={app.contract?.id ?? 'No response'} mono={Boolean(app.contract?.id)} /><Info label="Status" value={app.contract?.status ?? 'No response'} /></Card><BackendInline error={error} /><BottomCTA label={busy ? 'Saving signature' : 'Agree and sign'} secondary="Request edit" onClick={sign} /><ActionModal open={open} title="Agreement saved" onClose={() => setOpen(false)} primaryLabel="Continue" onPrimary={next}><p>BE2 contract status was updated.</p></ActionModal></Page>
 }
-
-function L05Signed({ next }: NavProps) {
-  return <Page><div className="success-block"><div className="success-icon"><CheckIcon /></div><h1>계약 체결 완료</h1><p>보증금 1,500만원이 안전하게 잠겼어요</p></div><Card><p className="doc-label">NEXT STEPS</p><Info label="06.01" value="첫 월세 자동 정산 · ₩680,000" /><Info label="12.01" value="6개월차 평판 리포트" /><Info label="2027.06.07" value="보증금 정산" /></Card><BottomCTA label="대시보드로" secondary="계약서" onClick={next} /></Page>
+function L05Signed({ next, app }: NavProps) {
+  return <Page><Hero title="Contract status" desc="No fixed next steps are shown. Only actual contract state." /><Card tone="soft"><Info label="Contract ID" value={app.contract?.id ?? 'No response'} mono={Boolean(app.contract?.id)} /><Info label="Status" value={app.contract?.status ?? 'No response'} /></Card><BottomCTA label="Dashboard" secondary="Contract" onClick={next} /></Page>
 }
-
-function L06Home({ go }: NavProps) {
-  return (
-    <Page bottomNav>
-      <div className="home-head"><span>BlueSafe</span></div>
-      <Hero title="안녕하세요, 김선생님" />
-      <div className="landlord-summary">
-        <div className="income-card">
-          <span>이번 달 수익</span>
-          <strong>2,040,000원</strong>
-          <p>받음 204만원 · 예정 68만원</p>
-        </div>
-        <div className="rent-status-card">
-          <span>정산 예정</span>
-          <strong>1건</strong>
-          <p>내일 입금</p>
-        </div>
-        <div className="vacancy-card">
-          <span>공실</span>
-          <strong>1개</strong>
-        </div>
-        <div className="quick-grid"><button>매물</button><button>월세</button><button onClick={() => go('l11')}>정산</button><button onClick={() => go('l10')}>리포트</button></div>
-      </div>
-      <div className="home-tasks landlord-properties">
-        <SectionTitle right="전체">내 매물 (3)</SectionTitle>
-        <ListItem icon="망원" title="망원동 12-3 #302" desc="Sarah K · 보증금 잠김" action={krw(rent)} onClick={() => go('l07')} />
-        <ListItem icon="연남" title="연남동 56 #501" desc="공실 · 모집중" action="모집중" />
-        <ListItem icon="망원" title="망원동 12-3 #201" desc="Diego R · 미납 1일" action={krw(rent)} onClick={() => go('l08')} />
-      </div>
-      <BottomSpace />
-    </Page>
-  )
+function L06Home({ go, app }: NavProps) {
+  const hasContract = Boolean(app.contract || app.xrplContract)
+  return <Page bottomNav><div className="home-head"><span>BlueSafe</span></div><Hero title="Landlord dashboard" desc="Operational data appears only from contract and settlement responses." /><div className="landlord-summary"><div className="income-card"><span>Contract status</span><strong>{app.contract?.status ?? 'No response'}</strong><p>{app.contract?.id ?? 'No BE2 contract'}</p></div><div className="rent-status-card"><span>Settlement</span><strong>{app.settlements.length}</strong><p>responses</p></div><div className="vacancy-card"><span>XRPL</span><strong>{app.xrplContract ? 'Linked' : 'Waiting'}</strong></div><div className="quick-grid"><button onClick={() => go('l07')}>Property</button><button>Rent</button><button onClick={() => go('l11')}>Settlement</button><button onClick={() => go('l10')}>Report</button></div></div><div className="home-tasks landlord-properties"><SectionTitle right="All">Contracts</SectionTitle>{hasContract ? <ListItem icon={<HomeIcon />} title="Contract response" desc={app.contract?.id ?? app.xrplContract?.id} action={app.contract?.status ?? app.xrplContract?.status} onClick={() => go('l07')} /> : <Card tone="soft"><strong>No contract data</strong><span>BE2 contract response will appear here.</span></Card>}</div><BottomSpace /></Page>
 }
-
-function L07Detail() {
-  return <Page><Hero title="망원동 12-3 #302" desc="Sarah Kim · 2026.06.01–2027.05.31" /><div className="property-summary"><div className="deposit-card"><span>잠긴 보증금</span><strong>{won(deposit)}</strong><p>멀티시그로 보관 중</p></div><div className="living-card"><span>거주</span><strong>83일차</strong></div></div><SectionTitle>월세 내역</SectionTitle><ListItem icon="Aug" title="월세 정산" desc="2026.08.01" action={`+${krw(rent)}`} /><ListItem icon="Jul" title="월세 정산" desc="2026.07.01" action={`+${krw(rent)}`} /><ListItem icon="Jun" title="월세 정산" desc="2026.06.01" action={`+${krw(rent)}`} /><SectionTitle>임차인</SectionTitle><ListItem icon="SK" title="Sarah Kim" desc="USA · F-2 · 평판 SBT 인증" action="안전" /></Page>
+function L07Detail({ app }: NavProps) {
+  return <Page><Hero title="Property detail" desc="Only actual contract response is shown." /><Card tone="soft"><Info label="BE2 contract" value={app.contract?.id ?? 'No response'} mono={Boolean(app.contract?.id)} /><Info label="BE1 escrow" value={app.xrplContract?.id ?? 'No response'} mono={Boolean(app.xrplContract?.id)} /><Info label="Status" value={app.contract?.status ?? app.xrplContract?.status ?? 'No response'} /></Card><SectionTitle>Tenant</SectionTitle><ListItem icon={<UserIcon />} title="Tenant ID" desc={app.tenantId} action={app.tenantAddress ? 'Wallet linked' : 'Waiting'} /></Page>
 }
-
-function L08LateRent({ next }: NavProps) {
-  return <Page><Hero title={'미납이지만\n돈은 들어왔어요'} desc="먼저 보증금에서 우선 차감해 송금했어요" /><Card tone="yellow"><span>미납 임차인</span><strong>Diego Ramirez</strong><span>망원동 12-3 #201 · 1일 지연</span></Card><Card><Info label="월세 자동 차감 완료" value="₩680,000" strong /><Info label="잠금 잔액" value="₩14,320,000" /><Info label="입금 시각" value="오늘 09:01" /></Card><p className="notice">임차인이 7일 안에 갚으면 잠금 잔액이 원복돼요. 그동안 BlueSafe가 알림과 추심을 진행해요.</p><BottomCTA label="확인" secondary="연락하기" onClick={next} /></Page>
+function L08LateRent({ next, app }: NavProps) {
+  return <Page><Hero title="Rent status" desc="Late rent and auto-deduction require actual payment or settlement API response." /><Card tone="soft"><strong>No rent event</strong><span>{app.settlements.length ? 'Settlement response exists.' : 'BE2 settlement or payment response is required.'}</span></Card><BottomCTA label="Confirm" secondary="Contact" onClick={next} /></Page>
 }
-
-function L10Earnings({ next }: NavProps) {
-  const bars = [42, 48, 52, 58, 64, 72, 78, 86, 74, 68, 61, 55]
-  return (
-    <Page bottomNav>
-      <Hero title="수익 리포트" desc="2026 · YTD" />
-      <div className="earnings-summary">
-        <div className="earnings-total"><span>누적 수익</span><strong>16,320,000원</strong><p>작년보다 +8.2%</p></div>
-        <div className="earnings-mini"><span>월평균</span><strong>204만원</strong></div>
-        <div className="earnings-mini"><span>예정</span><strong>68만원</strong></div>
-      </div>
-      <div className="earnings-chart">{bars.map((height, i) => <span style={{ height }} key={i}><b>{'JFMAMJJASOND'[i]}</b></span>)}</div>
-      <SectionTitle>매물별</SectionTitle>
-      <ListItem icon={<HomeIcon />} title="망원동 12-3 #302" desc="Sarah Kim · 8mo" action="₩5,440,000" />
-      <ListItem icon={<HomeIcon />} title="망원동 12-3 #201" desc="Diego Ramirez · 8mo" action="₩5,440,000" />
-      <ListItem icon={<HomeIcon />} title="연남동 56 #501" desc="비어있음 4개월" action="₩5,440,000" />
-      <Card tone="blue"><strong>종합소득세 신고용 자료</strong><span>내려받기 →</span></Card>
-      <BottomCTA label="정산 화면 보기" onClick={next} />
-    </Page>
-  )
+function L10Earnings({ next, app }: NavProps) {
+  const total = app.settlements.reduce((sum, item) => sum + (item.amountMinor ?? 0), 0)
+  return <Page bottomNav><Hero title="Earnings report" desc="No fixed YTD revenue. Only settlement totals are shown." /><div className="earnings-summary"><div className="earnings-total"><span>Settlement total</span><strong>{total ? krw(total) : 'No response'}</strong><p>{app.settlements.length} records</p></div><div className="earnings-mini"><span>Contract</span><strong>{app.contract ? '1' : '0'}</strong></div><div className="earnings-mini"><span>XRPL</span><strong>{app.xrplContract ? '1' : '0'}</strong></div></div><SectionTitle>By property</SectionTitle>{app.contract ? <ListItem icon={<HomeIcon />} title="Contract response" desc={app.contract.id} action={app.contract.status} /> : <Card tone="soft"><strong>No earnings data</strong><span>Settlement response will appear here.</span></Card>}<BottomCTA label="View settlement" onClick={next} /></Page>
 }
-
-function L11DepositRelease({ next, actions, busy, error }: NavProps) {
+function L11DepositRelease({ next, actions, busy, error, app }: NavProps) {
   const [open, setOpen] = useState(false)
-  const approve = async () => {
-    try {
-      await actions.landlordApproveSettlement()
-      setOpen(true)
-    } catch {
-      return
-    }
-  }
-  return <Page><Hero eyebrow="응답 필요" title={'퇴실 확인 +\n보증금 정산'} desc="응답 없으면 7일 후 자동 반환돼요" /><Card tone="soft"><Info label="잠긴 보증금" value={krw(deposit)} strong /></Card><SectionTitle>차감 항목</SectionTitle><ListItem icon={<ReceiptIcon />} title="청소 (전문 업체)" desc="영수증 첨부" action="−₩50,000" /><ListItem icon={<ReceiptIcon />} title="벽지 손상" desc="사진 2장" action="−₩0" /><ListItem icon={<ReceiptIcon />} title="가전 분실" desc="없음" action="−₩0" /><Card><Info label="임차인 환불액" value="₩14,950,000" strong /><Info label="내가 받는 차감금" value="₩50,000" /></Card><BackendInline error={error} /><BottomCTA label={busy ? '정산 승인 중' : '동의하고 정산'} secondary="거부" onClick={approve} /><ActionModal open={open} title="정산 승인 완료" onClose={() => setOpen(false)} primaryLabel="계속" onPrimary={next}><p>BE2 settlement 상태를 confirmed로 업데이트했어요. 기존 settlement가 없으면 프론트 로컬 상태로 승인 결과를 보관합니다.</p></ActionModal></Page>
+  const settlement = app.settlements[0]
+  const approve = async () => { try { await actions.landlordApproveSettlement(); setOpen(true) } catch { return } }
+  return <Page><Hero title="Deposit settlement" desc="Approval is based only on actual settlement response." /><Card tone="soft"><Info label="Settlement ID" value={settlement?.id ?? 'No response'} mono={Boolean(settlement?.id)} /><Info label="Status" value={settlement?.status ?? 'No response'} /><Info label="Amount" value={settlement?.amountMinor ? krw(settlement.amountMinor) : 'No amount response'} /></Card><BackendInline error={error} /><BottomCTA label={busy ? 'Approving settlement' : 'Approve settlement'} secondary="Reject" onClick={approve} /><ActionModal open={open} title="Settlement approved" onClose={() => setOpen(false)} primaryLabel="Continue" onPrimary={next}><p>BE2 settlement status was updated.</p></ActionModal></Page>
 }
-
-function L12Activity() {
-  const rows = [['2026 · 8월', '08.01', '월세 정산 — Sarah K', '#302', '+₩680,000'], ['', '08.02', '월세 자동 차감 — Diego R', '보증금에서', '+₩680,000'], ['2026 · 7월', '07.01', '월세 정산 — Sarah K', '#302', '+₩680,000'], ['', '07.01', '월세 정산 — Diego R', '#201', '+₩680,000']]
-  return <Page bottomNav><Hero title="거래 내역" /><div className="chip-wrap compact"><span className="chip selected">전체</span><span className="chip">월세</span><span className="chip">보증금</span><span className="chip">차감</span></div><ActivityRows rows={rows} /><BottomSpace /></Page>
+function L12Activity({ app }: NavProps) {
+  const rows: string[][] = []
+  const today = formatDate(new Date()).slice(5).replace('-', '.')
+  if (app.contract) rows.push(['Contract', today, 'BE2 contract response', app.contract.id, app.contract.status])
+  if (app.xrplContract) rows.push(['', today, 'BE1 escrow response', app.xrplContract.id, app.xrplContract.status])
+  app.settlements.forEach((item, index) => rows.push([index === 0 ? 'Settlement' : '', today, 'Settlement status', item.id, item.status]))
+  return <Page bottomNav><Hero title="Transaction history" desc="Only contract and settlement responses are shown." /><div className="chip-wrap compact"><span className="chip selected">All</span><span className="chip">Contract</span><span className="chip">Settlement</span></div>{rows.length ? <ActivityRows rows={rows} /> : <Card tone="soft"><strong>No transaction history</strong><span>BE2 contract or settlement response will appear here.</span></Card>}<BottomSpace /></Page>
 }
-
 function Page({ children, bottomNav = false }: { children: React.ReactNode; bottomNav?: boolean }) {
   return <section className={bottomNav ? 'page has-bottom-nav' : 'page'}>{children}</section>
 }
@@ -974,10 +799,6 @@ function Info({ label, value, strong = false, mono = false }: { label: string; v
   return <div className="info"><span>{label}</span><strong className={`${strong ? 'strong' : ''} ${mono ? 'mono' : ''}`}>{value}</strong></div>
 }
 
-function InfoList({ rows }: { rows: string[][] }) {
-  return <Card>{rows.map(([a, b]) => <Info key={a} label={a} value={b} />)}</Card>
-}
-
 function Checklist({ items }: { items: string[] }) {
   return <>{items.map((item) => <ListItem key={item} icon={<CheckIcon />} title={item} />)}</>
 }
@@ -994,41 +815,10 @@ function VaultDiagram() {
 }
 
 function ExamplePanel({ kind }: { kind: 'return' | 'bills' | 'proof' }) {
-  if (kind === 'return') {
-    return (
-      <div className="example-panel">
-        <div className="example-calendar">
-          <span>자동 반환 예정일</span>
-          <strong>2027.06.07</strong>
-          <small>응답 없으면 자동 반환</small>
-        </div>
-        <div className="example-chip">D-236</div>
-      </div>
-    )
-  }
-
-  if (kind === 'bills') {
-    return (
-      <div className="example-panel list-preview">
-        <div><CheckIcon /><span>전기</span><b>정상</b></div>
-        <div className="warn"><AlertIcon /><span>가스</span><b>+12.5%</b></div>
-        <div><CheckIcon /><span>수도</span><b>정상</b></div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="example-panel proof-preview">
-      <div>
-        <span>XRPL TX</span>
-        <strong>F2A8…91D3</strong>
-        <small>Explorer에서 직접 확인</small>
-      </div>
-      <ShieldIcon />
-    </div>
-  )
+  if (kind === 'return') return <div className="example-panel"><div className="example-calendar"><span>Auto return</span><strong>Waiting</strong><small>Calculated after contract dates exist</small></div><div className="example-chip">D-</div></div>
+  if (kind === 'bills') return <div className="example-panel list-preview"><div><CheckIcon /><span>Electric</span><b>Waiting</b></div><div><ReceiptIcon /><span>Gas</span><b>Evidence</b></div><div><CheckIcon /><span>Water</span><b>Waiting</b></div></div>
+  return <div className="example-panel proof-preview"><div><span>XRPL TX</span><strong>Waiting</strong><small>Shown after BE1 response</small></div><ShieldIcon /></div>
 }
-
 function Dots({ active, count }: { active: number; count: number }) {
   return <div className="dots">{Array.from({ length: count }, (_, i) => <button key={i} className={i === active ? 'active' : ''} />)}</div>
 }
@@ -1136,10 +926,6 @@ function krw(value: number) {
   return `₩${value.toLocaleString('ko-KR')}`
 }
 
-function won(value: number) {
-  return `${value.toLocaleString('ko-KR')}원`
-}
-
 function shortHash(value: string) {
   if (value.length <= 12) return value
   return `${value.slice(0, 6)}…${value.slice(-4)}`
@@ -1202,13 +988,11 @@ function CheckIcon() { return <svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" 
 function LockIcon() { return <svg viewBox="0 0 24 24"><path d="M7 10V8a5 5 0 0 1 10 0v2" /><rect x="5" y="10" width="14" height="11" rx="2" /></svg> }
 function UserIcon() { return <svg viewBox="0 0 24 24"><path d="M20 21a8 8 0 0 0-16 0" /><circle cx="12" cy="7" r="4" /></svg> }
 function KeyIcon() { return <svg viewBox="0 0 24 24"><circle cx="7.5" cy="14.5" r="4.5" /><path d="M11 11 21 1M16 6l2 2M14 8l2 2" /></svg> }
-function ClockIcon() { return <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg> }
 function ReceiptIcon() { return <svg viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z" /><path d="M9 8h6M9 12h6M9 16h4" /></svg> }
 function HomeIcon() { return <svg viewBox="0 0 24 24"><path d="m3 11 9-8 9 8" /><path d="M5 10v11h14V10" /></svg> }
 function ChartIcon() { return <svg viewBox="0 0 24 24"><path d="M4 19V5M4 19h16" /><path d="M8 16v-5M12 16V8M16 16v-8" /></svg> }
 function WalletIcon() { return <svg viewBox="0 0 24 24"><path d="M4 7h16v12H4z" /><path d="M4 7l3-4h13v4" /><path d="M17 13h.01" /></svg> }
 function HistoryIcon() { return <svg viewBox="0 0 24 24"><path d="M7 4h10a2 2 0 0 1 2 2v14l-3-2-3 2-3-2-3 2V6a2 2 0 0 1 2-2Z" /><path d="M10 9h6M10 13h6" /></svg> }
 function AlertIcon() { return <svg viewBox="0 0 24 24"><path d="M12 3 2 21h20L12 3Z" /><path d="M12 9v5M12 18h.01" /></svg> }
-function PlusIcon() { return <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg> }
 
 export default App
