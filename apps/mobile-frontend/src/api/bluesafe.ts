@@ -56,8 +56,8 @@ const xrplNetwork = parseXrplNetwork(import.meta.env.VITE_XRPL_NETWORK)
 export const backendConfig = {
   be1Url,
   be2Url,
-  hasBe1: Boolean(be1Url),
-  hasBe2: Boolean(be2Url),
+  hasBe1: true,
+  hasBe2: true,
 }
 
 function trimSlash(value: unknown) {
@@ -69,10 +69,6 @@ function parseXrplNetwork(value: unknown) {
 }
 
 async function request<T>(baseUrl: string, path: string, init?: RequestInit): Promise<T> {
-  if (!baseUrl) {
-    throw new Error('Backend URL is not configured')
-  }
-
   const headers = new Headers(init?.headers)
   if (!(init?.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')

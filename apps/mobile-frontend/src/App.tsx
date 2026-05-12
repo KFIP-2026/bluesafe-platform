@@ -41,15 +41,25 @@ type AppModel = {
   landlordId: string
   tenantAddress: string
   landlordAddress: string
+  contractDraft: ContractDraft
   contract?: BackendContract
   xrplContract?: BackendContract
   settlements: SettlementRecord[]
   backendEvents: string[]
 }
 
+type ContractDraft = {
+  depositAmount: string
+  stakeAmount: string
+  startsAt: string
+  endsAt: string
+}
+
 type AppActions = {
   selectRole: (role: UserRole) => void
   connectWallet: () => Promise<void>
+  connectCounterpartyWallet: () => Promise<void>
+  updateContractDraft: (patch: Partial<ContractDraft>) => void
   createDraftContract: () => Promise<BackendContract>
   lockDeposit: () => Promise<void>
   loadSettlements: () => Promise<void>
@@ -168,6 +178,17 @@ const ko = {
   deposit: '보증금',
   depositAmount: '보증금 금액',
   stake: '락업 수량',
+  contractTerms: '계약 조건',
+  contractTermsDesc: 'BE1 에스크로에 보낼 실제 조건을 입력해요.',
+  startDate: '시작일',
+  endDate: '종료일',
+  missingContractTerms: '보증금, 락업 수량, 계약 기간을 입력해야 해요',
+  connectLandlordWallet: '임대인 지갑 연결',
+  connectTenantWallet: '임차인 지갑 연결',
+  counterpartyWallet: '상대방 지갑',
+  counterpartyReady: '상대방 지갑이 준비됐어요',
+  counterpartyNeeded: '상대방 지갑 연결이 필요해요',
+  flowReady: '다음 단계 준비 완료',
   tx: 'XRPL TX',
   signContinue: '서명하고 계속',
   createContract: '계약 생성',
@@ -420,6 +441,17 @@ const en: typeof ko = {
   deposit: 'Deposit',
   depositAmount: 'Deposit amount',
   stake: 'Lockup amount',
+  contractTerms: 'Contract terms',
+  contractTermsDesc: 'Enter the real terms that will be sent to BE1 escrow.',
+  startDate: 'Start date',
+  endDate: 'End date',
+  missingContractTerms: 'Deposit, lockup amount, and contract dates are required',
+  connectLandlordWallet: 'Connect landlord wallet',
+  connectTenantWallet: 'Connect tenant wallet',
+  counterpartyWallet: 'Counterparty wallet',
+  counterpartyReady: 'Counterparty wallet is ready',
+  counterpartyNeeded: 'Counterparty wallet is required',
+  flowReady: 'Ready for the next step',
   tx: 'XRPL TX',
   signContinue: 'Sign and continue',
   createContract: 'Create contract',
@@ -618,12 +650,15 @@ function getInitialRole(screenId: ScreenId): UserRole {
   return screenId.startsWith('l') ? 'landlord' : 'tenant'
 }
 
-function App() {
-  const initialScreen = getInitialScreen()
-  const [screenId, setScreenId] = useState<ScreenId>(initialScreen)
-  const [lang, setLang] = useState<Lang>((localStorage.getItem('bluesafe-lang') as Lang | null) ?? 'ko')
-  const [app, setApp] = useState<AppModel>({
-    selectedRole: getInitialRole(initialScreen),
+const appStorageKey = 'bluesafe-runtime-state-v2'
+
+function emptyContractDraft(): ContractDraft {
+  return { depositAmount: '', stakeAmount: '', startsAt: '', endsAt: '' }
+}
+
+function createInitialApp(selectedRole: UserRole): AppModel {
+  return {
+    selectedRole,
     walletConnected: false,
     walletProvider: '',
     walletName: '',
@@ -632,9 +667,35 @@ function App() {
     landlordId: '',
     tenantAddress: '',
     landlordAddress: '',
+    contractDraft: emptyContractDraft(),
     settlements: [],
     backendEvents: [],
-  })
+  }
+}
+
+function loadStoredApp(selectedRole: UserRole): AppModel {
+  try {
+    const raw = localStorage.getItem(appStorageKey)
+    if (!raw) return createInitialApp(selectedRole)
+    const stored = JSON.parse(raw) as Partial<AppModel>
+    return {
+      ...createInitialApp(selectedRole),
+      ...stored,
+      selectedRole: stored.selectedRole ?? selectedRole,
+      contractDraft: { ...emptyContractDraft(), ...(stored.contractDraft ?? {}) },
+      settlements: Array.isArray(stored.settlements) ? stored.settlements : [],
+      backendEvents: Array.isArray(stored.backendEvents) ? stored.backendEvents : [],
+    }
+  } catch {
+    return createInitialApp(selectedRole)
+  }
+}
+
+function App() {
+  const initialScreen = getInitialScreen()
+  const [screenId, setScreenId] = useState<ScreenId>(initialScreen)
+  const [lang, setLang] = useState<Lang>((localStorage.getItem('bluesafe-lang') as Lang | null) ?? 'ko')
+  const [app, setApp] = useState<AppModel>(() => loadStoredApp(getInitialRole(initialScreen)))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const currentIndex = allScreens.findIndex((screen) => screen.id === screenId)
@@ -646,6 +707,9 @@ function App() {
     setLang(nextLang)
     localStorage.setItem('bluesafe-lang', nextLang)
   }
+  useEffect(() => {
+    localStorage.setItem(appStorageKey, JSON.stringify(app))
+  }, [app])
   const go = (id: ScreenId) => setScreenId(id)
   const next = () => setScreenId(allScreens[Math.min(currentIndex + 1, allScreens.length - 1)].id)
   const back = () => setScreenId(allScreens[Math.max(currentIndex - 1, 0)].id)
@@ -669,6 +733,7 @@ function App() {
 
   const actions: AppActions = {
     selectRole: (role) => setApp((prev) => ({ ...prev, selectedRole: role })),
+    updateContractDraft: (patch) => setApp((prev) => ({ ...prev, contractDraft: { ...prev.contractDraft, ...patch } })),
     connectWallet: async () => {
       await run(lang === 'ko' ? 'BlueSafe 내부 XRPL 지갑 연결' : 'BlueSafe internal XRPL wallet connected', async () => {
         const session = await connectInternalWallet(app.selectedRole)
@@ -686,23 +751,36 @@ function App() {
         })
       })
     },
+    connectCounterpartyWallet: async () => {
+      const role = app.selectedRole === 'tenant' ? 'landlord' : 'tenant'
+      await run(role === 'tenant'
+        ? (lang === 'ko' ? '임차인 내부 XRPL 지갑 연결' : 'Tenant internal XRPL wallet connected')
+        : (lang === 'ko' ? '임대인 내부 XRPL 지갑 연결' : 'Landlord internal XRPL wallet connected'), async () => {
+        const session = await connectInternalWallet(role)
+        setApp((prev) => role === 'tenant'
+          ? { ...prev, tenantAddress: session.account, tenantId: session.account }
+          : { ...prev, landlordAddress: session.account, landlordId: session.account })
+      })
+    },
     createDraftContract: async () => {
-      if (app.contract) return app.contract
+      if (app.contract) {
+        const contract = withContractDraft(app.contract, app.contractDraft)
+        setApp((prev) => ({ ...prev, contract }))
+        return contract
+      }
       return run(lang === 'ko' ? 'BE2 계약 생성' : 'BE2 contract created', async () => {
         if (!backendConfig.hasBe2) throw new Error('BE2 URL is not configured')
         const participants = getParticipantIds(app)
         if (!participants) throw new Error('Tenant and landlord identifiers are required')
-        const contract = await bluesafeApi.createOperationalContract(participants)
+        if (!isContractDraftReady(app.contractDraft)) throw new Error('Contract depositAmount, stakeAmount, startsAt and endsAt are required')
+        const contract = withContractDraft(await bluesafeApi.createOperationalContract(participants), app.contractDraft)
         setApp((prev) => ({ ...prev, contract }))
         return contract
       })
     },
     lockDeposit: async () => {
       await run(lang === 'ko' ? 'BE1 에스크로 생성 및 BE2 연결' : 'BE1 escrow created and anchored to BE2', async () => {
-        const contract = app.contract ?? await actions.createDraftContract()
-        if (backendConfig.hasBe2 && contract.status === 'draft') {
-          await bluesafeApi.updateOperationalContractStatus(contract.id, 'escrow_pending')
-        }
+        const contract = withContractDraft(app.contract ?? await actions.createDraftContract(), app.contractDraft)
         if (!backendConfig.hasBe1) throw new Error('BE1 URL is not configured')
         if (!app.tenantAddress || !app.landlordAddress) throw new Error('Tenant and landlord wallet addresses are required')
         const participants = getParticipantIds(app)
@@ -823,6 +901,7 @@ function WalletConnect({ go, app, actions, error, busy, lang }: NavProps) {
   const isTenant = app.selectedRole === 'tenant'
   const address = isTenant ? app.tenantAddress : app.landlordAddress
   const shortAddress = address ? shortHash(address) : ''
+  const roleWalletConnected = Boolean(address)
   const continueToRole = () => go(isTenant ? 't02' : 'l01')
   const connect = async () => {
     setConnecting(true)
@@ -833,10 +912,10 @@ function WalletConnect({ go, app, actions, error, busy, lang }: NavProps) {
       <div className="wallet-page">
         <Hero title={c.walletTitle} desc={isTenant ? c.walletTenantDesc : c.walletLandlordDesc} />
         <div className="wallet-visual" aria-hidden="true"><div className="wallet-orbit"><span /><span /><strong>XRPL</strong></div></div>
-        <div className="wallet-card"><div><span>{app.walletConnected ? c.walletConnected : c.walletPending}</span><strong>{app.walletConnected ? shortAddress : c.walletCreate}</strong><p>{app.walletConnected ? `${app.walletProvider} · ${app.walletNetwork || c.responseNone} · ${c.walletCustody}` : c.walletServer}</p></div></div>
+        <div className="wallet-card"><div><span>{roleWalletConnected ? c.walletConnected : c.walletPending}</span><strong>{roleWalletConnected ? shortAddress : c.walletCreate}</strong><p>{roleWalletConnected ? `${app.walletProvider || c.internalWallet} · ${app.walletNetwork || c.responseNone} · ${c.walletCustody}` : c.walletServer}</p></div></div>
         <div className="wallet-points"><span>{c.walletPoint1}</span><span>{c.walletPoint2}</span><span>{c.walletPoint3}</span></div>
         {error && <p className="wallet-error">{error}</p>}
-        <div className="entry-bottom wallet-bottom"><button className="white-cta" onClick={app.walletConnected ? continueToRole : connect}>{app.walletConnected ? c.continue : connecting || busy ? c.walletConnecting : c.walletConnect}</button><span>{isTenant ? c.tenantFlow : c.landlordFlow}</span></div>
+        <div className="entry-bottom wallet-bottom"><button className="white-cta" onClick={roleWalletConnected ? continueToRole : connect}>{roleWalletConnected ? c.continue : connecting || busy ? c.walletConnecting : c.walletConnect}</button><span>{isTenant ? c.tenantFlow : c.landlordFlow}</span></div>
       </div>
     </Page>
   )
@@ -879,15 +958,21 @@ function T04Kyc({ next, lang }: NavProps) {
   return <Page><StepperHeader current={0} /><Hero title={c.kycTitle} desc={c.kycDesc} /><div className="camera-card"><div>{c.kycDesc}</div></div><SectionTitle>{c.checklist}</SectionTitle><Checklist items={[c.kyc1, c.kyc2, c.kyc3]} /><BottomCTA label={c.takePhoto} onClick={next} /></Page>
 }
 
-function T05Invite({ next, lang }: NavProps) {
+function T05Invite({ next, app, actions, busy, error, lang }: NavProps) {
   const c = copy[lang]
+  const landlordReady = Boolean(app.landlordAddress)
+  const connect = async () => { try { await actions.connectCounterpartyWallet() } catch { return } }
   return (
     <Page>
       <Hero title={c.inviteTitle} desc={c.inviteDesc} />
-      <Card tone="soft"><strong>{c.responseNone}</strong><span>{c.inviteNeeded}</span></Card>
+      <Card tone="soft">
+        <Info label={c.tenantWallet} value={app.tenantAddress ? shortHash(app.tenantAddress) : c.walletNeeded} mono={Boolean(app.tenantAddress)} />
+        <Info label={c.landlordWallet} value={app.landlordAddress ? shortHash(app.landlordAddress) : c.walletNeeded} mono={Boolean(app.landlordAddress)} />
+      </Card>
       <SectionTitle>{c.landlordTodo}</SectionTitle>
-      <Timeline items={[{ title: c.inviteStep1, desc: c.inviteStep1Desc }, { title: c.inviteStep2, desc: c.inviteStep2Desc }, { title: c.inviteStep3, desc: c.inviteStep3Desc }]} />
-      <BottomCTA label={c.sendKakao} secondary={c.later} onClick={next} />
+      <Timeline items={[{ title: c.counterpartyWallet, desc: landlordReady ? c.counterpartyReady : c.counterpartyNeeded, state: landlordReady ? 'done' : 'pending' }, { title: c.inviteStep2, desc: c.inviteStep2Desc, state: 'pending' }, { title: c.inviteStep3, desc: c.inviteStep3Desc, state: 'pending' }]} />
+      <BackendInline error={error} />
+      <BottomCTA label={landlordReady ? c.next : busy ? c.walletConnecting : c.connectLandlordWallet} secondary={landlordReady ? undefined : c.later} onClick={landlordReady ? next : connect} />
     </Page>
   )
 }
@@ -895,18 +980,24 @@ function T05Invite({ next, lang }: NavProps) {
 function T06Contract({ next, actions, busy, error, app, lang }: NavProps) {
   const c = copy[lang]
   const [open, setOpen] = useState(false)
+  const contract = app.contract ? withContractDraft(app.contract, app.contractDraft) : undefined
+  const participantsReady = Boolean(getParticipantIds(app))
+  const termsReady = isContractDraftReady(app.contractDraft)
+  const canCreate = participantsReady && termsReady && !busy
+  const canContinue = Boolean(contract) && termsReady
   const create = async () => { try { await actions.createDraftContract(); setOpen(true) } catch { return } }
   return (
     <Page bottomNav>
       <Hero title={c.contractTitle} desc={c.contractDesc} />
       <Card tone="soft">
-        <Info label={c.contractId} value={app.contract?.id ?? c.responseNone} mono={Boolean(app.contract?.id)} />
-        <Info label={c.status} value={statusText(app.contract?.status, lang)} />
-        <Info label={c.period} value={dateRange(app.contract?.startsAt, app.contract?.endsAt, lang)} />
-        <Info label={c.deposit} value={app.contract?.depositAmount ?? c.responseNone} />
+        <Info label={c.tenantWallet} value={app.tenantAddress ? shortHash(app.tenantAddress) : c.walletNeeded} mono={Boolean(app.tenantAddress)} />
+        <Info label={c.landlordWallet} value={app.landlordAddress ? shortHash(app.landlordAddress) : c.walletNeeded} mono={Boolean(app.landlordAddress)} />
+        <Info label={c.contractId} value={contract?.id ?? c.responseNone} mono={Boolean(contract?.id)} />
+        <Info label={c.status} value={statusText(contract?.status, lang)} />
       </Card>
-      <BackendInline error={error} />
-      <BottomCTA label={busy ? c.responseWaiting : app.contract ? c.signContinue : c.createContract} onClick={app.contract ? next : create} />
+      <ContractTermsForm draft={app.contractDraft} onChange={actions.updateContractDraft} lang={lang} />
+      <BackendInline label={!participantsReady ? c.walletBothNeeded : !termsReady ? c.missingContractTerms : c.flowReady} error={error} />
+      <BottomCTA disabled={contract ? !canContinue : !canCreate} label={busy ? c.responseWaiting : contract ? c.signContinue : c.createContract} onClick={contract ? next : create} />
       <ActionModal open={open} title={c.contractTitle} onClose={() => setOpen(false)} primaryLabel={c.next} onPrimary={next}><p>{app.contract?.id ?? c.responseWaiting}</p></ActionModal>
     </Page>
   )
@@ -914,22 +1005,24 @@ function T06Contract({ next, actions, busy, error, app, lang }: NavProps) {
 
 function T07Pay({ next, actions, busy, error, app, lang }: NavProps) {
   const c = copy[lang]
-  const amount = app.contract?.depositAmount
+  const contract = getPreparedContract(app)
+  const amount = contract?.depositAmount
   const hasTenantWallet = Boolean(app.tenantAddress)
   const hasLandlordWallet = Boolean(app.landlordAddress)
-  const canRunEscrow = hasTenantWallet && hasLandlordWallet
+  const hasTerms = isContractDraftReady(app.contractDraft)
+  const canRunEscrow = Boolean(contract) && hasTenantWallet && hasLandlordWallet && hasTerms
   return (
     <Page>
       <Hero title={c.escrowTitle} desc={c.escrowDesc} />
       <Card tone="soft">
         <Info label={c.depositAmount} value={amount ?? c.responseNone} strong={Boolean(amount)} />
-        <Info label={c.stake} value={app.contract?.stakeAmount ?? c.responseNone} />
+        <Info label={c.stake} value={contract?.stakeAmount ?? c.responseNone} />
         <Info label={c.tenantWallet} value={app.tenantAddress ? shortHash(app.tenantAddress) : c.walletNeeded} mono={hasTenantWallet} />
         <Info label={c.landlordWallet} value={app.landlordAddress ? shortHash(app.landlordAddress) : c.walletNeeded} mono={hasLandlordWallet} />
       </Card>
-      <ListItem icon={<WalletIcon />} title={c.internalWallet} desc={canRunEscrow ? c.walletBothReady : c.walletBothNeeded} />
+      <ListItem icon={<WalletIcon />} title={c.internalWallet} desc={canRunEscrow ? c.walletBothReady : !hasTerms ? c.missingContractTerms : c.walletBothNeeded} />
       <BackendInline error={error} />
-      <BottomCTA label={busy ? c.creatingEscrow : c.createEscrow} onClick={async () => { try { await actions.lockDeposit(); next() } catch { return } }} />
+      <BottomCTA disabled={!canRunEscrow || busy} label={busy ? c.creatingEscrow : c.createEscrow} onClick={async () => { try { await actions.lockDeposit(); next() } catch { return } }} />
     </Page>
   )
 }
@@ -942,7 +1035,7 @@ function T08Receipt({ next, app, lang }: NavProps) {
 
 function T09Home({ go, app, error, lang }: NavProps) {
   const c = copy[lang]
-  const contract = app.contract ?? app.xrplContract
+  const contract = getPreparedContract(app) ?? app.xrplContract
   const metrics = getLeaseMetrics(app)
   const deposit = contract?.depositAmount ?? c.responseNone
   const daysLeft = metrics ? `${metrics.daysLeft}` : c.responseNone
@@ -973,12 +1066,15 @@ function T09Home({ go, app, error, lang }: NavProps) {
 
 function T10Countdown({ app, actions, lang }: NavProps) {
   const c = copy[lang]
+  const contract = getPreparedContract(app)
   const metrics = getLeaseMetrics(app)
   const finishAfter = metrics?.finishAfter
   const left = metrics?.returnLeft
   const settlement = app.settlements[0]
+  // actions is recreated by App each render; this screen only needs an enter-time refresh.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { void actions.loadSettlements() }, [])
-  const hasContractDates = Boolean(app.contract?.startsAt && app.contract?.endsAt)
+  const hasContractDates = Boolean(contract?.startsAt && contract?.endsAt)
   const hasTx = Boolean(app.xrplContract?.depositEscrowTxHash)
   const progressItems: TimelineItem[] = settlement
     ? [
@@ -986,7 +1082,7 @@ function T10Countdown({ app, actions, lang }: NavProps) {
         { title: c.returnPrep, desc: settlement.id, state: 'pending' },
       ]
     : [
-        { title: c.period, desc: dateRange(app.contract?.startsAt, app.contract?.endsAt, lang), state: hasContractDates ? 'done' : 'pending' },
+        { title: c.period, desc: dateRange(contract?.startsAt, contract?.endsAt, lang), state: hasContractDates ? 'done' : 'pending' },
         { title: c.tx, desc: hasTx ? shortHash(app.xrplContract!.depositEscrowTxHash!) : c.responseNone, state: hasTx ? 'done' : 'pending' },
         { title: c.settlementStatus, desc: c.responseNone, state: 'pending' },
       ]
@@ -1035,9 +1131,11 @@ function T20Activity({ next, app, lang }: NavProps) {
   return <Page bottomNav><Hero title={c.activityTitle} desc={c.activityDesc} /><div className="chip-wrap compact"><span className="chip selected">{c.all}</span><span className="chip">{c.walletCreated}</span><span className="chip">{c.contract}</span></div>{rows.length > 0 ? <ActivityRows rows={rows} /> : <Card tone="soft"><strong>{c.activityEmpty}</strong><span>{c.activityEmptyDesc}</span></Card>}<BottomCTA label={c.landlordView} onClick={next} /></Page>
 }
 
-function L01Invited({ next, app, lang }: NavProps) {
+function L01Invited({ next, app, actions, busy, error, lang }: NavProps) {
   const c = copy[lang]
-  return <Page><div className="home-head"><span>BlueSafe</span></div><Hero title={c.lStartTitle} desc={c.lStartDesc} /><Card tone="soft"><strong>{app.contract ? c.be2ContractResponse : c.noInvite}</strong><span>{app.contract?.id ?? c.inviteNeeded}</span></Card><BottomCTA label={c.viewContract} secondary={c.later} onClick={next} /></Page>
+  const tenantReady = Boolean(app.tenantAddress)
+  const connect = async () => { try { await actions.connectCounterpartyWallet() } catch { return } }
+  return <Page><div className="home-head"><span>BlueSafe</span></div><Hero title={c.lStartTitle} desc={c.lStartDesc} /><Card tone="soft"><Info label={c.landlordWallet} value={app.landlordAddress ? shortHash(app.landlordAddress) : c.walletNeeded} mono={Boolean(app.landlordAddress)} /><Info label={c.tenantWallet} value={app.tenantAddress ? shortHash(app.tenantAddress) : c.walletNeeded} mono={Boolean(app.tenantAddress)} /><Info label={c.contractId} value={app.contract?.id ?? c.responseNone} mono={Boolean(app.contract?.id)} /></Card><BackendInline error={error} /><BottomCTA label={tenantReady ? c.viewContract : busy ? c.walletConnecting : c.connectTenantWallet} secondary={tenantReady ? c.later : undefined} onClick={tenantReady ? next : connect} /></Page>
 }
 
 function L02Verify({ next, lang }: NavProps) {
@@ -1054,8 +1152,11 @@ function L03Property({ next, app, lang }: NavProps) {
 function L04Review({ next, actions, busy, error, app, lang }: NavProps) {
   const c = copy[lang]
   const [open, setOpen] = useState(false)
+  const participantsReady = Boolean(getParticipantIds(app))
+  const termsReady = isContractDraftReady(app.contractDraft)
+  const canSign = participantsReady && termsReady && !busy
   const sign = async () => { try { await actions.landlordSignContract(); setOpen(true) } catch { return } }
-  return <Page><Hero title={c.reviewContract} desc={c.reviewContractDesc} /><Card tone="soft"><Info label={c.contractId} value={app.contract?.id ?? c.responseNone} mono={Boolean(app.contract?.id)} /><Info label={c.status} value={statusText(app.contract?.status, lang)} /></Card><BackendInline error={error} /><BottomCTA label={busy ? c.savingSignature : c.agreeSign} secondary={c.requestEdit} onClick={sign} /><ActionModal open={open} title={c.agreementSaved} onClose={() => setOpen(false)} primaryLabel={c.continue} onPrimary={next}><p>{c.agreementSavedDesc}</p></ActionModal></Page>
+  return <Page><Hero title={c.reviewContract} desc={c.reviewContractDesc} /><Card tone="soft"><Info label={c.contractId} value={app.contract?.id ?? c.responseNone} mono={Boolean(app.contract?.id)} /><Info label={c.status} value={statusText(app.contract?.status, lang)} /><Info label={c.tenantWallet} value={app.tenantAddress ? shortHash(app.tenantAddress) : c.walletNeeded} mono={Boolean(app.tenantAddress)} /></Card><ContractTermsForm draft={app.contractDraft} onChange={actions.updateContractDraft} lang={lang} /><BackendInline label={!participantsReady ? c.walletBothNeeded : !termsReady ? c.missingContractTerms : c.flowReady} error={error} /><BottomCTA disabled={!canSign} label={busy ? c.savingSignature : c.agreeSign} secondary={c.requestEdit} onClick={sign} /><ActionModal open={open} title={c.agreementSaved} onClose={() => setOpen(false)} primaryLabel={c.continue} onPrimary={next}><p>{c.agreementSavedDesc}</p></ActionModal></Page>
 }
 
 function L05Signed({ next, app, lang }: NavProps) {
@@ -1123,8 +1224,8 @@ function HomeIndicator() {
   return <div className="home-indicator"><span /></div>
 }
 
-function BottomCTA({ label, secondary, onClick }: { label: string; secondary?: string; onClick: () => void }) {
-  return <div className={secondary ? 'bottom-cta has-secondary' : 'bottom-cta'}>{secondary && <button className="secondary">{secondary}</button>}<button className="primary" onClick={onClick}>{label}</button></div>
+function BottomCTA({ label, secondary, disabled = false, onClick }: { label: string; secondary?: string; disabled?: boolean; onClick: () => void }) {
+  return <div className={secondary ? 'bottom-cta has-secondary' : 'bottom-cta'}>{secondary && <button className="secondary" type="button">{secondary}</button>}<button className="primary" type="button" disabled={disabled} onClick={disabled ? undefined : onClick}>{label}</button></div>
 }
 
 function Card({ children, tone = 'white' }: { children: ReactNode; tone?: 'white' | 'soft' | 'blue' | 'yellow' }) {
@@ -1141,6 +1242,36 @@ function ListItem({ icon, title, desc, action, onClick }: { icon: ReactNode; tit
 
 function Info({ label, value, strong = false, mono = false }: { label: string; value: string; strong?: boolean; mono?: boolean }) {
   return <div className="info"><span>{label}</span><strong className={`${strong ? 'strong' : ''} ${mono ? 'mono' : ''}`}>{value}</strong></div>
+}
+
+function ContractTermsForm({ draft, onChange, lang }: { draft: ContractDraft; onChange: (patch: Partial<ContractDraft>) => void; lang: Lang }) {
+  const c = copy[lang]
+  return (
+    <Card tone="soft">
+      <div className="form-head">
+        <strong>{c.contractTerms}</strong>
+        <span>{c.contractTermsDesc}</span>
+      </div>
+      <label className="flow-field">
+        <span>{c.depositAmount}</span>
+        <input inputMode="numeric" value={draft.depositAmount} placeholder="0" onChange={(event) => onChange({ depositAmount: onlyDigits(event.currentTarget.value) })} />
+      </label>
+      <label className="flow-field">
+        <span>{c.stake}</span>
+        <input inputMode="numeric" value={draft.stakeAmount} placeholder="0" onChange={(event) => onChange({ stakeAmount: onlyDigits(event.currentTarget.value) })} />
+      </label>
+      <div className="date-grid">
+        <label className="flow-field">
+          <span>{c.startDate}</span>
+          <input inputMode="numeric" value={draft.startsAt} placeholder="YYYY-MM-DD" onChange={(event) => onChange({ startsAt: normalizeDateInput(event.currentTarget.value) })} />
+        </label>
+        <label className="flow-field">
+          <span>{c.endDate}</span>
+          <input inputMode="numeric" value={draft.endsAt} placeholder="YYYY-MM-DD" onChange={(event) => onChange({ endsAt: normalizeDateInput(event.currentTarget.value) })} />
+        </label>
+      </div>
+    </Card>
+  )
 }
 
 function Checklist({ items }: { items: string[] }) {
@@ -1260,8 +1391,12 @@ function dateRange(start?: string, end?: string, lang: Lang = 'ko') {
 }
 
 function localizeError(message: string, lang: Lang) {
-  if (lang === 'en') return message || 'Request failed'
+  if (lang === 'en') {
+    if (message.includes('Cannot POST /contracts')) return 'Full BE1 escrow API is not running'
+    return message || 'Request failed'
+  }
   if (!message) return '요청 처리에 실패했어요'
+  if (message.includes('Cannot POST /contracts')) return '전체 BE1 에스크로 API가 실행 중이어야 해요'
   if (message.includes('Failed to fetch')) return '서버에 연결하지 못했어요'
   if (message.includes('Wallet API URL is not configured')) return '지갑 API 주소가 설정되지 않았어요'
   if (message.includes('URL is not configured')) return '백엔드 주소가 설정되지 않았어요'
@@ -1304,9 +1439,47 @@ function getParticipantIds(app: AppModel) {
   return { tenantId, landlordId }
 }
 
+function onlyDigits(value: string) {
+  return value.replace(/\D/g, '')
+}
+
+function normalizeDateInput(value: string) {
+  const digits = onlyDigits(value).slice(0, 8)
+  if (digits.length <= 4) return digits
+  if (digits.length <= 6) return `${digits.slice(0, 4)}-${digits.slice(4)}`
+  return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6)}`
+}
+
+function isContractDraftReady(draft: ContractDraft) {
+  const startsAt = parseDate(draft.startsAt)
+  const endsAt = parseDate(draft.endsAt)
+  return Boolean(
+    Number(draft.depositAmount) > 0
+    && Number(draft.stakeAmount) > 0
+    && startsAt
+    && endsAt
+    && endsAt.getTime() > startsAt.getTime(),
+  )
+}
+
+function withContractDraft(contract: BackendContract, draft: ContractDraft): BackendContract {
+  return {
+    ...contract,
+    depositAmount: contract.depositAmount || draft.depositAmount || undefined,
+    stakeAmount: contract.stakeAmount || draft.stakeAmount || undefined,
+    startsAt: contract.startsAt || draft.startsAt || undefined,
+    endsAt: contract.endsAt || draft.endsAt || undefined,
+  }
+}
+
+function getPreparedContract(app: AppModel) {
+  return app.contract ? withContractDraft(app.contract, app.contractDraft) : undefined
+}
+
 function getLeaseMetrics(app: AppModel) {
-  const startsAt = parseDate(app.contract?.startsAt ?? app.xrplContract?.startsAt)
-  const endsAt = parseDate(app.contract?.endsAt ?? app.xrplContract?.endsAt)
+  const contract = getPreparedContract(app) ?? app.xrplContract
+  const startsAt = parseDate(contract?.startsAt)
+  const endsAt = parseDate(contract?.endsAt)
   if (!startsAt || !endsAt) return undefined
   const finishAfter = addDays(endsAt, 7)
   const now = new Date()
