@@ -1,19 +1,21 @@
-import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties } from 'react'
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import './App.css'
-import { backendConfig, bluesafeApi, type BackendContract, type SettlementRecord } from './api/bluesafe'
+import { backendConfig, bluesafeApi, type BackendContract, type ContractStatus, type SettlementRecord } from './api/bluesafe'
 import { connectInternalWallet } from './api/internalWallet'
 import reputationMascot from './assets/reputation-mascot.png'
 
 type ScreenId =
   | 't01' | 'role' | 'wallet' | 't02' | 't03' | 't04' | 't05' | 't06' | 't07' | 't08' | 't09' | 't10'
   | 't11' | 't12' | 't13' | 't17' | 't18' | 't19' | 't20'
-  | 'l01' | 'l02' | 'l03' | 'l04' | 'l05' | 'l06' | 'l07' | 'l08' | 'l10'
-  | 'l11' | 'l12'
+  | 'l01' | 'l02' | 'l03' | 'l04' | 'l05' | 'l06' | 'l07' | 'l08' | 'l10' | 'l11' | 'l12'
+
+type Lang = 'ko' | 'en'
+type UserRole = 'tenant' | 'landlord'
 
 type ScreenDef = {
   id: ScreenId
-  label: string
-  group: '임차인' | '임대인'
+  label: Record<Lang, string>
+  group: string
   tab?: 'tenant' | 'landlord'
   component: React.ComponentType<NavProps>
 }
@@ -25,9 +27,8 @@ type NavProps = {
   actions: AppActions
   busy: boolean
   error: string
+  lang: Lang
 }
-
-type UserRole = 'tenant' | 'landlord'
 
 type AppModel = {
   selectedRole: UserRole
@@ -55,42 +56,542 @@ type AppActions = {
   landlordApproveSettlement: () => Promise<void>
 }
 
+const ko = {
+  start: '시작하기',
+  next: '다음',
+  continue: '계속하기',
+  later: '나중에',
+  confirm: '확인',
+  home: '홈',
+  history: '내역',
+  contract: '계약',
+  profile: '내정보',
+  revenue: '수익',
+  all: '전체',
+  waiting: '대기 중',
+  ready: '준비됨',
+  complete: '완료',
+  responseNone: '응답 없음',
+  responseWaiting: '응답 대기',
+  contractWaiting: '계약 응답 대기',
+  walletNeeded: '지갑 연결 필요',
+  entryTitle: '보증금 걱정\n더이상 하지마세요',
+  entryDesc: '블루세이프가 지켜드릴게요.\n토스 인증으로 30초만에 시작해요.',
+  multisig: '멀티시그',
+  autoReturn: '자동반환',
+  remittance: '국제송금',
+  entryFoot: '토스 인증으로 30초 만에 가입',
+  roleTitle: '어떤 계약으로\n시작할까요',
+  roleDesc: '역할에 맞는 화면으로 안내할게요.',
+  tenant: '임차인',
+  landlord: '임대인',
+  tenantRoleTitle: '보증금을 안전하게 맡길래요',
+  tenantRoleDesc: '계약 확인, 보증금 락업, 자동 반환',
+  landlordRoleTitle: '계약과 정산을 관리할래요',
+  landlordRoleDesc: '계약 확인, 월세 정산, 반환 승인',
+  tenantFlow: '임차인 계약 플로우로 시작',
+  landlordFlow: '임대인 계약 플로우로 시작',
+  walletTitle: 'BlueSafe 지갑을\n준비해요',
+  walletTenantDesc: '보증금을 안전하게 보관할 내부 XRPL 지갑이에요.',
+  walletLandlordDesc: '계약과 정산을 확인할 내부 XRPL 지갑이에요.',
+  walletConnected: '연결 완료',
+  walletPending: '연결 대기',
+  walletCreate: '내부 XRPL 지갑을 생성해주세요',
+  walletConnect: '내 지갑 만들기',
+  walletConnecting: '준비 중',
+  walletServer: 'BlueSafe 서버가 지갑을 만들고 주소만 앱에 연결해요.',
+  walletCustody: '서버 보관',
+  walletPoint1: '멀티시그 보관',
+  walletPoint2: '온체인 영수증',
+  walletPoint3: '자동 반환 추적',
+  onboarding1Title: '보증금이\n에스크로에 잠겨요',
+  onboarding1Desc: '계약 기간 동안 임대인도, 임차인도\n중간에 꺼낼 수 없어요.',
+  onboarding2Title: '퇴실 후\n자동으로 돌아와요',
+  onboarding2Desc: '집주인이 응답하지 않아도\n7일 후 보증금이 자동 반환돼요.',
+  onboarding3Title: '공과금 흐름은\n현재 제외했어요',
+  onboarding3Desc: '이번 제품 빌드는 계약, 지갑, 에스크로,\n정산 플로우에 집중해요.',
+  onboarding4Title: '모든 기록은\n직접 확인할 수 있어요',
+  onboarding4Desc: '보증금 락업과 반환 기록은\nXRPL 응답이 있을 때 표시돼요.',
+  skip: '건너뛰기',
+  authTitle: '토스로\n간편하게 인증하기',
+  authDesc: '본인 확인을 위해 한 번만 거치면 돼요.',
+  authSafe: '안전한 본인확인',
+  authSafeDesc: '계약 생성을 위한 최소 정보만 사용해요.',
+  authInfo: 'BlueSafe가 받아오는 정보',
+  nameBirth: '이름·생년월일',
+  nameBirthDesc: '계약서 자동 채우기에 사용',
+  regNumber: '외국인등록번호',
+  regNumberDesc: 'KYC 1단계 통과',
+  ownerAccount: '본인 명의 계좌',
+  ownerAccountDesc: '보증금 입출금 검증',
+  authNotice: '인증 정보는 암호화되어 보관돼요.',
+  tossAuth: '토스로 인증하기',
+  terms: '약관 보기',
+  authDone: '인증 준비 완료',
+  kycTitle: '외국인 등록증을\n업로드해요',
+  kycDesc: '여기에 카드를 맞춰요',
+  checklist: '확인 항목',
+  kyc1: '카드 전체가 프레임에 들어왔는지',
+  kyc2: '글자가 흐릿하지 않은지',
+  kyc3: '뒷면 칩이 보이지 않는지',
+  takePhoto: '촬영하기',
+  inviteTitle: '집주인을\n초대해요',
+  inviteDesc: '카카오·문자 어디로든 보낼 수 있어요.',
+  inviteLink: '초대 링크',
+  copy: '복사',
+  kakao: '카카오톡',
+  sms: '문자',
+  landlordTodo: '집주인이 할 일',
+  inviteStep1: '링크 클릭 → 인증',
+  inviteStep1Desc: '같은 BlueSafe 화면이 열려요',
+  inviteStep2: '계약서 확인 + 서명',
+  inviteStep2Desc: '백엔드 계약 응답 기준',
+  inviteStep3: '보증금 받을 계좌 등록',
+  inviteStep3Desc: '본인 명의만 가능',
+  sendKakao: '카카오톡으로 보내기',
+  review: '검토 중',
+  contractTitle: '3자 안심 계약서',
+  contractDesc: '집주인·BlueSafe·임차인 모두가 서명해요.',
+  contractId: '계약 ID',
+  status: '상태',
+  period: '계약 기간',
+  deposit: '보증금',
+  depositAmount: '보증금 금액',
+  stake: '락업 수량',
+  tx: 'XRPL TX',
+  signContinue: '서명하고 계속',
+  createContract: '계약 생성',
+  escrowTitle: '안전 송금 금액',
+  escrowDesc: '실제 지갑 주소와 백엔드 응답이 준비됐을 때만 실행해요.',
+  tenantWallet: '임차인 지갑',
+  landlordWallet: '임대인 지갑',
+  internalWallet: '내부 XRPL 지갑',
+  walletBothReady: '양쪽 주소가 준비됐어요',
+  walletBothNeeded: '임차인과 임대인 지갑 주소가 모두 필요해요',
+  createEscrow: 'XRPL 에스크로 생성',
+  creatingEscrow: '에스크로 생성 중',
+  receiptTitle: '보증금이 잠겼어요',
+  receiptDesc: '백엔드와 XRPL 응답으로 확인된 정보만 표시해요.',
+  onchainReceipt: '온체인 영수증',
+  explorer: '익스플로러로 보기',
+  share: '공유',
+  backendStatus: '연동 상태',
+  homeDeposit: '현재 보증금',
+  safeMultisig: '멀티시그로 안전하게 보관해요',
+  daysLeft: '일 남음',
+  untilExpiry: '계약 만료까지',
+  living: '거주',
+  report: '리포트',
+  return: '반환',
+  todayTodo: '오늘 할 일',
+  noTodo: '아직 표시할 일이 없어요',
+  noTodoDesc: '지갑, 계약, 에스크로 응답이 생기면 여기에 표시돼요.',
+  escrowCreated: 'XRPL 에스크로가 생성됐어요',
+  escrowPending: '계약은 생성됐고 에스크로 대기 중이에요',
+  backendWaiting: '백엔드 계약 응답을 기다리고 있어요',
+  countdownTitle: '자동 반환까지',
+  countdownDesc: '집주인이 응답하지 않아도 반환 조건을 확인해요.',
+  day: '일',
+  hour: '시간',
+  minute: '분',
+  noAction: '아무것도 안 해도 돼요',
+  noActionDesc: '계약 종료 후 정산 응답이 준비되면 반환 절차가 진행돼요.',
+  progress: '진행 상황',
+  reportTitle: '안전 리포트',
+  reportDesc: '실제 계약과 정산 신호만 표시해요.',
+  noScore: '아직 점수가 없어요',
+  noScoreDesc: '점수 API가 연결되면 점수와 변동폭이 표시돼요.',
+  signals: '신호',
+  settlement: '정산',
+  reputationTitle: '평판이 차올라요',
+  reputationDesc: '백엔드 평판 점수 API가 연결되면 등급이 표시돼요.',
+  noGrade: '아직 평판 등급이 없어요',
+  noGradeDesc: '점수와 등급은 실제 API 응답 이후에만 표시돼요.',
+  requiredSignals: '필요한 신호',
+  contractHistory: '계약 기록',
+  escrowHistory: '에스크로 기록',
+  utilityTitle: '공과금',
+  utilityDesc: '현재 제품 빌드에서는 비활성화된 플로우예요.',
+  utilityDisabled: '공과금 플로우 비활성화',
+  utilityDisabledDesc: '계약, 지갑, 에스크로, 정산, 송금 플로우만 활성화되어 있어요.',
+  moveoutTitle: '퇴실 체크리스트',
+  moveoutDesc: '정산 응답이 있는지만 확인해요.',
+  settlementResponse: '정산 응답',
+  returnPrep: '반환 준비',
+  returnPrepDesc: 'BE2 정산 응답이 생기면 반환 플로우가 표시돼요.',
+  checkSettlement: '정산 확인',
+  returnedTitle: '보증금이 돌아왔어요',
+  returnedDesc: '반환 금액은 실제 정산 응답에서만 표시해요.',
+  noReturnData: '반환 데이터가 없어요',
+  noReturnDataDesc: 'BE2 정산 응답이 필요해요.',
+  prepareRemittance: '송금 준비',
+  fxTitle: '본국으로\n송금하기',
+  fxDesc: '수취인과 환율 견적은 송금 API 연결 후 표시돼요.',
+  settlementFound: '정산 금액 확인',
+  noFxData: '송금 데이터가 없어요',
+  recipient: '수취인',
+  recipientWaiting: '송금 API 응답 없음',
+  activityTitle: '활동 내역',
+  activityDesc: '지갑, 계약, 에스크로, 정산 이벤트만 표시해요.',
+  activityEmpty: '아직 활동 내역이 없어요',
+  activityEmptyDesc: '지갑과 계약 이벤트가 성공하면 여기에 표시돼요.',
+  walletCreated: '지갑 생성',
+  tenantWalletCreated: '임차인 지갑 생성',
+  landlordWalletCreated: '임대인 지갑 생성',
+  be2ContractResponse: 'BE2 계약 응답',
+  be1EscrowResponse: 'BE1 에스크로 응답',
+  xrplTxCreated: 'XRPL TX 생성',
+  settlementStatus: '정산 상태',
+  landlordView: '임대인 화면',
+  lStartTitle: '임대인으로 시작하기',
+  lStartDesc: '초대 또는 BE2 계약 응답에서 온 데이터만 표시해요.',
+  noInvite: '초대 데이터가 없어요',
+  inviteNeeded: 'BE2 계약 또는 초대 API 응답이 필요해요.',
+  viewContract: '계약서 보기',
+  lVerifyTitle: '임대인\n인증 종류',
+  lVerifyDesc: '월세 받을 명의를 선택해요.',
+  personal: '개인',
+  business: '개인사업자',
+  corporation: '법인',
+  lVerifyNotice: '월세 수령 계좌는 본인 명의여야 해요.',
+  propertyTitle: '매물 정보',
+  propertyDesc: '주소와 계약 조건은 실제 매물 API 응답이 필요해요.',
+  noProperty: '매물 데이터가 없어요',
+  propertyNeeded: 'BE2 매물 응답이 필요해요.',
+  reviewContract: '계약서 확인',
+  reviewContractDesc: '임대인 서명에는 BE2 계약 응답만 사용해요.',
+  savingSignature: '서명 저장 중',
+  agreeSign: '동의하고 서명',
+  requestEdit: '수정 요청',
+  agreementSaved: '동의가 저장됐어요',
+  agreementSavedDesc: 'BE2 계약 상태가 업데이트됐어요.',
+  contractStatusTitle: '계약 상태',
+  contractStatusDesc: '고정된 다음 단계 없이 실제 계약 상태만 표시해요.',
+  dashboard: '대시보드',
+  landlordDashboard: '임대인 대시보드',
+  landlordDashboardDesc: '계약과 정산 응답에서 온 운영 데이터만 표시해요.',
+  property: '매물',
+  rent: '월세',
+  contracts: '계약',
+  noContractData: '계약 데이터가 없어요',
+  noContractDataDesc: 'BE2 계약 응답이 여기에 표시돼요.',
+  propertyDetail: '매물 상세',
+  propertyDetailDesc: '실제 계약 응답만 표시해요.',
+  tenantId: '임차인 ID',
+  walletLinked: '지갑 연결됨',
+  rentStatus: '월세 상태',
+  rentStatusDesc: '미납과 자동 차감은 실제 결제 또는 정산 API 응답이 필요해요.',
+  noRentEvent: '월세 이벤트가 없어요',
+  earningsReport: '수익 리포트',
+  earningsDesc: '고정 YTD 수익 없이 정산 합계만 표시해요.',
+  settlementTotal: '정산 합계',
+  records: '건',
+  byProperty: '매물별',
+  noEarnings: '수익 데이터가 없어요',
+  noEarningsDesc: '정산 응답이 여기에 표시돼요.',
+  viewSettlement: '정산 화면 보기',
+  depositSettlement: '보증금 정산',
+  depositSettlementDesc: '승인은 실제 정산 응답 기준으로만 처리해요.',
+  settlementId: '정산 ID',
+  amount: '금액',
+  noAmount: '금액 응답 없음',
+  approvingSettlement: '정산 승인 중',
+  approveSettlement: '정산 승인',
+  reject: '거부',
+  settlementApproved: '정산 승인 완료',
+  transactionHistory: '거래 내역',
+  transactionHistoryDesc: '계약과 정산 응답만 표시해요.',
+  noTransactionHistory: '거래 내역이 없어요',
+  noTransactionHistoryDesc: 'BE2 계약 또는 정산 응답이 여기에 표시돼요.',
+}
+
+const en: typeof ko = {
+  start: 'Start',
+  next: 'Next',
+  continue: 'Continue',
+  later: 'Later',
+  confirm: 'Confirm',
+  home: 'Home',
+  history: 'History',
+  contract: 'Contract',
+  profile: 'Profile',
+  revenue: 'Revenue',
+  all: 'All',
+  waiting: 'Waiting',
+  ready: 'Ready',
+  complete: 'Complete',
+  responseNone: 'No response',
+  responseWaiting: 'Waiting for response',
+  contractWaiting: 'Waiting for contract',
+  walletNeeded: 'Wallet required',
+  entryTitle: 'Stop worrying\nabout your deposit',
+  entryDesc: 'BlueSafe will protect it for you.\nStart in 30 seconds with Toss verification.',
+  multisig: 'Multisig',
+  autoReturn: 'Auto return',
+  remittance: 'Remittance',
+  entryFoot: 'Join in 30 seconds with Toss verification',
+  roleTitle: 'Which contract\nare you starting?',
+  roleDesc: 'We will guide you through the right flow.',
+  tenant: 'Tenant',
+  landlord: 'Landlord',
+  tenantRoleTitle: 'I want to protect my deposit',
+  tenantRoleDesc: 'Contract review, deposit lockup, auto return',
+  landlordRoleTitle: 'I want to manage contracts',
+  landlordRoleDesc: 'Contract review, rent settlement, return approval',
+  tenantFlow: 'Start tenant contract flow',
+  landlordFlow: 'Start landlord contract flow',
+  walletTitle: 'Prepare your\nBlueSafe wallet',
+  walletTenantDesc: 'An internal XRPL wallet for securing your deposit.',
+  walletLandlordDesc: 'An internal XRPL wallet for contract and settlement checks.',
+  walletConnected: 'Connected',
+  walletPending: 'Waiting',
+  walletCreate: 'Create your internal XRPL wallet',
+  walletConnect: 'Create wallet',
+  walletConnecting: 'Preparing',
+  walletServer: 'BlueSafe creates the wallet and connects only the address to the app.',
+  walletCustody: 'Server custody',
+  walletPoint1: 'Multisig custody',
+  walletPoint2: 'On-chain receipt',
+  walletPoint3: 'Auto-return tracking',
+  onboarding1Title: 'Your deposit\nis locked in escrow',
+  onboarding1Desc: 'During the contract period, neither side\ncan withdraw it alone.',
+  onboarding2Title: 'After move-out,\nit returns automatically',
+  onboarding2Desc: 'Even without landlord response,\nthe deposit can return after 7 days.',
+  onboarding3Title: 'Utility flow\nis excluded for now',
+  onboarding3Desc: 'This build focuses on contract, wallet,\nescrow, and settlement flows.',
+  onboarding4Title: 'Every record\ncan be verified',
+  onboarding4Desc: 'Deposit lockup and return records appear\nwhen XRPL responses exist.',
+  skip: 'Skip',
+  authTitle: 'Verify easily\nwith Toss',
+  authDesc: 'You only need to verify once.',
+  authSafe: 'Secure identity check',
+  authSafeDesc: 'Only minimum data for contract creation is used.',
+  authInfo: 'Information BlueSafe receives',
+  nameBirth: 'Name and birth date',
+  nameBirthDesc: 'Used for contract autofill',
+  regNumber: 'Alien registration number',
+  regNumberDesc: 'Pass KYC level 1',
+  ownerAccount: 'Account in your name',
+  ownerAccountDesc: 'Verify deposit inflow and outflow',
+  authNotice: 'Verification data is stored encrypted.',
+  tossAuth: 'Verify with Toss',
+  terms: 'View terms',
+  authDone: 'Verification is ready',
+  kycTitle: 'Upload your\nregistration card',
+  kycDesc: 'Align the card here',
+  checklist: 'Checklist',
+  kyc1: 'The entire card is inside the frame',
+  kyc2: 'The text is not blurry',
+  kyc3: 'The rear chip is not visible',
+  takePhoto: 'Take photo',
+  inviteTitle: 'Invite your\nlandlord',
+  inviteDesc: 'Send it by KakaoTalk or text.',
+  inviteLink: 'Invite link',
+  copy: 'Copy',
+  kakao: 'KakaoTalk',
+  sms: 'SMS',
+  landlordTodo: 'What the landlord does',
+  inviteStep1: 'Open link and verify',
+  inviteStep1Desc: 'The same BlueSafe screen opens',
+  inviteStep2: 'Review and sign contract',
+  inviteStep2Desc: 'Based on backend contract response',
+  inviteStep3: 'Register receiving account',
+  inviteStep3Desc: 'Only accounts in their name',
+  sendKakao: 'Send via KakaoTalk',
+  review: 'Reviewing',
+  contractTitle: 'Three-party safe contract',
+  contractDesc: 'Landlord, BlueSafe, and tenant all sign.',
+  contractId: 'Contract ID',
+  status: 'Status',
+  period: 'Contract period',
+  deposit: 'Deposit',
+  depositAmount: 'Deposit amount',
+  stake: 'Lockup amount',
+  tx: 'XRPL TX',
+  signContinue: 'Sign and continue',
+  createContract: 'Create contract',
+  escrowTitle: 'Safe transfer amount',
+  escrowDesc: 'Runs only when real wallet addresses and backend responses are ready.',
+  tenantWallet: 'Tenant wallet',
+  landlordWallet: 'Landlord wallet',
+  internalWallet: 'Internal XRPL wallet',
+  walletBothReady: 'Both addresses are ready',
+  walletBothNeeded: 'Tenant and landlord wallet addresses are required',
+  createEscrow: 'Create XRPL escrow',
+  creatingEscrow: 'Creating escrow',
+  receiptTitle: 'Deposit is locked',
+  receiptDesc: 'Only backend and XRPL verified data is shown.',
+  onchainReceipt: 'On-chain receipt',
+  explorer: 'Open explorer',
+  share: 'Share',
+  backendStatus: 'Integration status',
+  homeDeposit: 'Current deposit',
+  safeMultisig: 'Stored safely with multisig',
+  daysLeft: 'days left',
+  untilExpiry: 'Until contract expiry',
+  living: 'Living',
+  report: 'Report',
+  return: 'Return',
+  todayTodo: 'Today',
+  noTodo: 'Nothing to show yet',
+  noTodoDesc: 'Wallet, contract, and escrow responses will appear here.',
+  escrowCreated: 'XRPL escrow has been created',
+  escrowPending: 'Contract exists and escrow is pending',
+  backendWaiting: 'Waiting for backend contract response',
+  countdownTitle: 'Until auto return',
+  countdownDesc: 'Return conditions are checked even without landlord response.',
+  day: 'Day',
+  hour: 'Hour',
+  minute: 'Min',
+  noAction: 'Nothing else to do',
+  noActionDesc: 'After contract end, settlement response starts the return process.',
+  progress: 'Progress',
+  reportTitle: 'Safety report',
+  reportDesc: 'Only real contract and settlement signals are shown.',
+  noScore: 'No score yet',
+  noScoreDesc: 'Score and delta appear after the scoring API is connected.',
+  signals: 'Signals',
+  settlement: 'Settlement',
+  reputationTitle: 'Reputation grows',
+  reputationDesc: 'Grades appear after the backend reputation scoring API is connected.',
+  noGrade: 'No reputation grade yet',
+  noGradeDesc: 'Score and grade appear only after real API responses.',
+  requiredSignals: 'Required signals',
+  contractHistory: 'Contract history',
+  escrowHistory: 'Escrow history',
+  utilityTitle: 'Utilities',
+  utilityDesc: 'This flow is disabled in the current product build.',
+  utilityDisabled: 'Utility flow disabled',
+  utilityDisabledDesc: 'Only contract, wallet, escrow, settlement, and remittance flows are active.',
+  moveoutTitle: 'Move-out checklist',
+  moveoutDesc: 'Only settlement response is checked.',
+  settlementResponse: 'Settlement response',
+  returnPrep: 'Return preparation',
+  returnPrepDesc: 'Deposit return flow appears after BE2 settlement response exists.',
+  checkSettlement: 'Check settlement',
+  returnedTitle: 'Deposit returned',
+  returnedDesc: 'Return amount is shown only from actual settlement response.',
+  noReturnData: 'No return data',
+  noReturnDataDesc: 'BE2 settlement response is required.',
+  prepareRemittance: 'Prepare remittance',
+  fxTitle: 'Send money\nhome',
+  fxDesc: 'Recipient and FX quote appear after remittance API integration.',
+  settlementFound: 'Settlement amount found',
+  noFxData: 'No remittance data',
+  recipient: 'Recipient',
+  recipientWaiting: 'No remittance API response',
+  activityTitle: 'Activity history',
+  activityDesc: 'Only wallet, contract, escrow, and settlement events are shown.',
+  activityEmpty: 'No activity yet',
+  activityEmptyDesc: 'Wallet and contract events will appear here after successful calls.',
+  walletCreated: 'Wallet created',
+  tenantWalletCreated: 'Tenant wallet created',
+  landlordWalletCreated: 'Landlord wallet created',
+  be2ContractResponse: 'BE2 contract response',
+  be1EscrowResponse: 'BE1 escrow response',
+  xrplTxCreated: 'XRPL TX created',
+  settlementStatus: 'Settlement status',
+  landlordView: 'Landlord view',
+  lStartTitle: 'Start as landlord',
+  lStartDesc: 'Only invite or BE2 contract response data is shown.',
+  noInvite: 'No invite data',
+  inviteNeeded: 'BE2 contract or invite API response is required.',
+  viewContract: 'View contract',
+  lVerifyTitle: 'Landlord\nverification type',
+  lVerifyDesc: 'Choose the name that receives rent.',
+  personal: 'Individual',
+  business: 'Sole proprietor',
+  corporation: 'Corporation',
+  lVerifyNotice: 'The rent receiving account must be in your name.',
+  propertyTitle: 'Property data',
+  propertyDesc: 'Address and terms require a real property API response.',
+  noProperty: 'No property data',
+  propertyNeeded: 'BE2 property response is required.',
+  reviewContract: 'Review contract',
+  reviewContractDesc: 'Only BE2 contract response is used for landlord signing.',
+  savingSignature: 'Saving signature',
+  agreeSign: 'Agree and sign',
+  requestEdit: 'Request edit',
+  agreementSaved: 'Agreement saved',
+  agreementSavedDesc: 'BE2 contract status was updated.',
+  contractStatusTitle: 'Contract status',
+  contractStatusDesc: 'No fixed next steps are shown. Only actual contract state.',
+  dashboard: 'Dashboard',
+  landlordDashboard: 'Landlord dashboard',
+  landlordDashboardDesc: 'Operational data appears only from contract and settlement responses.',
+  property: 'Property',
+  rent: 'Rent',
+  contracts: 'Contracts',
+  noContractData: 'No contract data',
+  noContractDataDesc: 'BE2 contract response will appear here.',
+  propertyDetail: 'Property detail',
+  propertyDetailDesc: 'Only actual contract response is shown.',
+  tenantId: 'Tenant ID',
+  walletLinked: 'Wallet linked',
+  rentStatus: 'Rent status',
+  rentStatusDesc: 'Late rent and auto-deduction require actual payment or settlement API response.',
+  noRentEvent: 'No rent event',
+  earningsReport: 'Earnings report',
+  earningsDesc: 'No fixed YTD revenue. Only settlement totals are shown.',
+  settlementTotal: 'Settlement total',
+  records: 'records',
+  byProperty: 'By property',
+  noEarnings: 'No earnings data',
+  noEarningsDesc: 'Settlement response will appear here.',
+  viewSettlement: 'View settlement',
+  depositSettlement: 'Deposit settlement',
+  depositSettlementDesc: 'Approval is based only on actual settlement response.',
+  settlementId: 'Settlement ID',
+  amount: 'Amount',
+  noAmount: 'No amount response',
+  approvingSettlement: 'Approving settlement',
+  approveSettlement: 'Approve settlement',
+  reject: 'Reject',
+  settlementApproved: 'Settlement approved',
+  transactionHistory: 'Transaction history',
+  transactionHistoryDesc: 'Only contract and settlement responses are shown.',
+  noTransactionHistory: 'No transaction history',
+  noTransactionHistoryDesc: 'BE2 contract or settlement response will appear here.',
+}
+
+const copy = { ko, en }
+
 const tenantScreens: ScreenDef[] = [
-  { id: 't01', label: '시작', group: '임차인', component: T01Entry },
-  { id: 'role', label: '역할 선택', group: '임차인', component: RoleSelect },
-  { id: 't02', label: '온보딩', group: '임차인', component: T02Onboarding },
-  { id: 't03', label: '토스 인증', group: '임차인', component: T03Auth },
-  { id: 't04', label: 'ARC KYC', group: '임차인', component: T04Kyc },
-  { id: 't05', label: '임대인 초대', group: '임차인', component: T05Invite },
-  { id: 't06', label: '계약', group: '임차인', tab: 'tenant', component: T06Contract },
-  { id: 't07', label: '보증금 송금', group: '임차인', component: T07Pay },
-  { id: 't08', label: '영수증', group: '임차인', component: T08Receipt },
-  { id: 't09', label: '홈', group: '임차인', tab: 'tenant', component: T09Home },
-  { id: 't10', label: '자동 반환', group: '임차인', component: T10Countdown },
-  { id: 't11', label: '안전 리포트', group: '임차인', component: T11Report },
-  { id: 't12', label: '평판', group: '임차인', component: T12Reputation },
-  { id: 't13', label: '공과금', group: '임차인', component: T13Bills },
-  { id: 't17', label: '퇴실 체크', group: '임차인', component: T17Moveout },
-  { id: 't18', label: '반환 완료', group: '임차인', component: T18Returned },
-  { id: 't19', label: '본국 송금', group: '임차인', component: T19Fx },
-  { id: 't20', label: '활동 내역', group: '임차인', tab: 'tenant', component: T20Activity },
+  { id: 't01', label: { ko: '시작', en: 'Start' }, group: 'tenant', component: T01Entry },
+  { id: 'role', label: { ko: '역할 선택', en: 'Choose role' }, group: 'tenant', component: RoleSelect },
+  { id: 't02', label: { ko: '온보딩', en: 'Onboarding' }, group: 'tenant', component: T02Onboarding },
+  { id: 't03', label: { ko: '토스 인증', en: 'Toss verification' }, group: 'tenant', component: T03Auth },
+  { id: 't04', label: { ko: '신분증 업로드', en: 'ID upload' }, group: 'tenant', component: T04Kyc },
+  { id: 't05', label: { ko: '임대인 초대', en: 'Invite landlord' }, group: 'tenant', component: T05Invite },
+  { id: 't06', label: { ko: '계약', en: 'Contract' }, group: 'tenant', tab: 'tenant', component: T06Contract },
+  { id: 't07', label: { ko: '보증금 송금', en: 'Deposit transfer' }, group: 'tenant', component: T07Pay },
+  { id: 't08', label: { ko: '영수증', en: 'Receipt' }, group: 'tenant', component: T08Receipt },
+  { id: 't09', label: { ko: '홈', en: 'Home' }, group: 'tenant', tab: 'tenant', component: T09Home },
+  { id: 't10', label: { ko: '자동 반환', en: 'Auto return' }, group: 'tenant', component: T10Countdown },
+  { id: 't11', label: { ko: '안전 리포트', en: 'Safety report' }, group: 'tenant', component: T11Report },
+  { id: 't12', label: { ko: '평판', en: 'Reputation' }, group: 'tenant', component: T12Reputation },
+  { id: 't13', label: { ko: '공과금', en: 'Utilities' }, group: 'tenant', component: T13Bills },
+  { id: 't17', label: { ko: '퇴실 체크', en: 'Move-out' }, group: 'tenant', component: T17Moveout },
+  { id: 't18', label: { ko: '반환 완료', en: 'Returned' }, group: 'tenant', component: T18Returned },
+  { id: 't19', label: { ko: '본국 송금', en: 'Remittance' }, group: 'tenant', component: T19Fx },
+  { id: 't20', label: { ko: '활동 내역', en: 'Activity' }, group: 'tenant', tab: 'tenant', component: T20Activity },
 ]
 
 const landlordScreens: ScreenDef[] = [
-  { id: 'l01', label: '초대', group: '임대인', component: L01Invited },
-  { id: 'l02', label: '임대인 인증', group: '임대인', component: L02Verify },
-  { id: 'l03', label: '매물 정보', group: '임대인', component: L03Property },
-  { id: 'l04', label: '계약 확인', group: '임대인', component: L04Review },
-  { id: 'l05', label: '계약 완료', group: '임대인', component: L05Signed },
-  { id: 'l06', label: '임대인 홈', group: '임대인', tab: 'landlord', component: L06Home },
-  { id: 'l07', label: '매물 상세', group: '임대인', component: L07Detail },
-  { id: 'l08', label: '미납 자동 차감', group: '임대인', component: L08LateRent },
-  { id: 'l10', label: '수익 리포트', group: '임대인', tab: 'landlord', component: L10Earnings },
-  { id: 'l11', label: '보증금 정산', group: '임대인', component: L11DepositRelease },
-  { id: 'l12', label: '거래 내역', group: '임대인', tab: 'landlord', component: L12Activity },
+  { id: 'l01', label: { ko: '초대', en: 'Invite' }, group: 'landlord', component: L01Invited },
+  { id: 'l02', label: { ko: '임대인 인증', en: 'Verification' }, group: 'landlord', component: L02Verify },
+  { id: 'l03', label: { ko: '매물 정보', en: 'Property' }, group: 'landlord', component: L03Property },
+  { id: 'l04', label: { ko: '계약 확인', en: 'Review' }, group: 'landlord', component: L04Review },
+  { id: 'l05', label: { ko: '계약 완료', en: 'Signed' }, group: 'landlord', component: L05Signed },
+  { id: 'l06', label: { ko: '임대인 홈', en: 'Landlord home' }, group: 'landlord', tab: 'landlord', component: L06Home },
+  { id: 'l07', label: { ko: '매물 상세', en: 'Property detail' }, group: 'landlord', component: L07Detail },
+  { id: 'l08', label: { ko: '월세 상태', en: 'Rent status' }, group: 'landlord', component: L08LateRent },
+  { id: 'l10', label: { ko: '수익 리포트', en: 'Earnings' }, group: 'landlord', tab: 'landlord', component: L10Earnings },
+  { id: 'l11', label: { ko: '보증금 정산', en: 'Settlement' }, group: 'landlord', component: L11DepositRelease },
+  { id: 'l12', label: { ko: '거래 내역', en: 'Transactions' }, group: 'landlord', tab: 'landlord', component: L12Activity },
 ]
 
-const walletScreen: ScreenDef = { id: 'wallet', label: '지갑 연결', group: tenantScreens[0].group, component: WalletConnect }
+const walletScreen: ScreenDef = { id: 'wallet', label: { ko: '지갑 연결', en: 'Wallet' }, group: 'tenant', component: WalletConnect }
 const allScreens = [...tenantScreens.slice(0, 2), walletScreen, ...tenantScreens.slice(2), ...landlordScreens]
 
 function getInitialScreen(): ScreenId {
@@ -105,15 +606,17 @@ function getInitialRole(screenId: ScreenId): UserRole {
 }
 
 function App() {
-  const [screenId, setScreenId] = useState<ScreenId>(getInitialScreen)
+  const initialScreen = getInitialScreen()
+  const [screenId, setScreenId] = useState<ScreenId>(initialScreen)
+  const [lang, setLang] = useState<Lang>((localStorage.getItem('bluesafe-lang') as Lang | null) ?? 'ko')
   const [app, setApp] = useState<AppModel>({
-    selectedRole: getInitialRole(getInitialScreen()),
+    selectedRole: getInitialRole(initialScreen),
     walletConnected: false,
     walletProvider: '',
     walletName: '',
     walletNetwork: '',
-    tenantId: 'tenant_sarah_kim',
-    landlordId: 'landlord_kim',
+    tenantId: 'tenant',
+    landlordId: 'landlord',
     tenantAddress: '',
     landlordAddress: '',
     settlements: [],
@@ -122,16 +625,18 @@ function App() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const currentIndex = allScreens.findIndex((screen) => screen.id === screenId)
-  const current = allScreens[currentIndex]
+  const current = allScreens[currentIndex] ?? allScreens[0]
   const CurrentScreen = current.component
   const showTopBar = screenId !== 't01' && !isChromeLessScreen(screenId)
 
+  const setLanguage = (nextLang: Lang) => {
+    setLang(nextLang)
+    localStorage.setItem('bluesafe-lang', nextLang)
+  }
   const go = (id: ScreenId) => setScreenId(id)
   const next = () => setScreenId(allScreens[Math.min(currentIndex + 1, allScreens.length - 1)].id)
   const back = () => setScreenId(allScreens[Math.max(currentIndex - 1, 0)].id)
-  const pushEvent = (message: string) => {
-    setApp((prev) => ({ ...prev, backendEvents: [message, ...prev.backendEvents].slice(0, 5) }))
-  }
+  const pushEvent = (message: string) => setApp((prev) => ({ ...prev, backendEvents: [message, ...prev.backendEvents].slice(0, 5) }))
   const run = async <T,>(label: string, task: () => Promise<T>) => {
     setBusy(true)
     setError('')
@@ -140,20 +645,19 @@ function App() {
       pushEvent(label)
       return result
     } catch (err) {
-      const message = err instanceof Error ? err.message : '요청 처리에 실패했어요'
+      const message = err instanceof Error ? localizeError(err.message, lang) : localizeError('', lang)
       setError(message)
-      pushEvent(`${label} 실패: ${message}`)
+      pushEvent(`${label} ${lang === 'ko' ? '실패' : 'failed'}: ${message}`)
       throw err
     } finally {
       setBusy(false)
     }
   }
+
   const actions: AppActions = {
-    selectRole: (role) => {
-      setApp((prev) => ({ ...prev, selectedRole: role }))
-    },
+    selectRole: (role) => setApp((prev) => ({ ...prev, selectedRole: role })),
     connectWallet: async () => {
-      await run('BlueSafe 내부 XRPL 지갑 연결', async () => {
+      await run(lang === 'ko' ? 'BlueSafe 내부 XRPL 지갑 연결' : 'BlueSafe internal XRPL wallet connected', async () => {
         const session = await connectInternalWallet(app.selectedRole)
         setApp((prev) => {
           const nextState = {
@@ -163,7 +667,6 @@ function App() {
             walletName: session.account,
             walletNetwork: session.network,
           }
-
           return prev.selectedRole === 'tenant'
             ? { ...nextState, tenantAddress: session.account }
             : { ...nextState, landlordAddress: session.account }
@@ -172,7 +675,7 @@ function App() {
     },
     createDraftContract: async () => {
       if (app.contract) return app.contract
-      return run('BE2 계약 draft 생성', async () => {
+      return run(lang === 'ko' ? 'BE2 계약 생성' : 'BE2 contract created', async () => {
         if (!backendConfig.hasBe2) throw new Error('BE2 URL is not configured')
         const contract = await bluesafeApi.createOperationalContract({ tenantId: app.tenantId, landlordId: app.landlordId })
         setApp((prev) => ({ ...prev, contract }))
@@ -180,12 +683,11 @@ function App() {
       })
     },
     lockDeposit: async () => {
-      await run('BE1 XRPL 에스크로 락업 + BE2 앵커 연결', async () => {
+      await run(lang === 'ko' ? 'BE1 에스크로 생성 및 BE2 연결' : 'BE1 escrow created and anchored to BE2', async () => {
         const contract = app.contract ?? await actions.createDraftContract()
         if (backendConfig.hasBe2 && contract.status === 'draft') {
           await bluesafeApi.updateOperationalContractStatus(contract.id, 'escrow_pending')
         }
-
         if (!backendConfig.hasBe1) throw new Error('BE1 URL is not configured')
         if (!app.tenantAddress || !app.landlordAddress) throw new Error('Tenant and landlord wallet addresses are required')
         if (!contract.depositAmount || !contract.stakeAmount) throw new Error('Contract depositAmount and stakeAmount are required')
@@ -194,7 +696,6 @@ function App() {
         if (Number.isNaN(endsAt.getTime())) throw new Error('Contract endsAt is invalid')
         const finishAfter = addDays(endsAt, 7).toISOString()
         const cancelAfter = addDays(endsAt, 30).toISOString()
-
         const xrplContract = await bluesafeApi.createXrplContract({
           tenantAddress: app.tenantAddress,
           landlordAddress: app.landlordAddress,
@@ -208,30 +709,27 @@ function App() {
           landlordPii: 'landlord verified by BlueSafe',
           tenantEmail: 'tenant@bluesafe.local',
         })
-
         const txHash = xrplContract.depositEscrowTxHash
         if (!txHash) throw new Error('BE1 did not return an escrow transaction hash')
         const anchored = await bluesafeApi.anchorEscrow(contract.id, txHash)
-
         await bluesafeApi.trackTx({
           txHash,
           txType: 'EscrowCreate',
           account: xrplContract.contractAccountAddress ?? app.tenantAddress,
         }).catch(() => undefined)
-
         setApp((prev) => ({ ...prev, contract: anchored, xrplContract }))
       })
     },
     loadSettlements: async () => {
       const contractId = app.contract?.id
       if (!contractId || !backendConfig.hasBe2) return
-      await run('BE2 정산 상태 조회', async () => {
+      await run(lang === 'ko' ? 'BE2 정산 상태 조회' : 'BE2 settlement status loaded', async () => {
         const page = await bluesafeApi.listSettlements(contractId)
         setApp((prev) => ({ ...prev, settlements: page.items }))
       })
     },
     landlordSignContract: async () => {
-      await run('BE2 임대인 계약 동의', async () => {
+      await run(lang === 'ko' ? 'BE2 임대인 계약 동의' : 'BE2 landlord agreement saved', async () => {
         const contract = app.contract ?? await actions.createDraftContract()
         if (!backendConfig.hasBe2) throw new Error('BE2 URL is not configured')
         const signed = await bluesafeApi.updateOperationalContractStatus(contract.id, contract.status === 'draft' ? 'escrow_pending' : contract.status)
@@ -239,7 +737,7 @@ function App() {
       })
     },
     landlordApproveSettlement: async () => {
-      await run('BE2 보증금 정산 승인', async () => {
+      await run(lang === 'ko' ? 'BE2 보증금 정산 승인' : 'BE2 deposit settlement approved', async () => {
         const contract = app.contract ?? await actions.createDraftContract()
         const settlement = app.settlements[0]
         if (!backendConfig.hasBe2) throw new Error('BE2 URL is not configured')
@@ -258,501 +756,359 @@ function App() {
   return (
     <main className="app-shell">
       <section className="phone">
-        <StatusBar light={screenId === 't01'} />
+        <StatusBar />
+        <LangToggle lang={lang} onChange={setLanguage} />
         <div className={screenId === 't01' ? 'viewport is-entry' : 'viewport'}>
-          {showTopBar && <TopBar title={current.label} onBack={back} />}
-          <CurrentScreen key={screenId} next={next} go={go} app={app} actions={actions} busy={busy} error={error} />
+          {showTopBar && <TopBar title={current.label[lang]} onBack={back} />}
+          <CurrentScreen key={screenId} next={next} go={go} app={app} actions={actions} busy={busy} error={error} lang={lang} />
         </div>
-        {current.tab === 'tenant' && <TenantNav active={screenId} go={go} />}
-        {current.tab === 'landlord' && <LandlordNav active={screenId} go={go} />}
-        <HomeIndicator light={screenId === 't01'} />
+        {current.tab === 'tenant' && <TenantNav active={screenId} go={go} lang={lang} />}
+        {current.tab === 'landlord' && <LandlordNav active={screenId} go={go} lang={lang} />}
+        <HomeIndicator />
       </section>
     </main>
   )
 }
 
-function T01Entry({ next }: NavProps) {
+function T01Entry({ next, lang }: NavProps) {
+  const c = copy[lang]
   return (
     <div className="entry">
       <img src={reputationMascot} alt="" className="entry-watermark" />
-      <div className="entry-copy">
-        <h1>보증금 걱정<br />더이상 하지마세요</h1>
-        <p>블루세이프가 지켜드릴게요.<br />토스 인증으로 30초만에 시작해요.</p>
+      <div className="entry-copy"><h1>{lines(c.entryTitle)}</h1><p>{lines(c.entryDesc)}</p></div>
+      <div className="entry-keywords" aria-label="BlueSafe features">
+        <span>{c.multisig}</span><span>{c.autoReturn}</span><span>{c.remittance}</span>
       </div>
-      <div className="entry-keywords" aria-label="BlueSafe 핵심 기능">
-        <span>멀티시그</span>
-        <span>자동반환</span>
-        <span>국제송금</span>
-      </div>
-      <div className="entry-bottom"><button className="white-cta" onClick={next}>시작하기</button><span>토스 인증으로 30초 만에 가입</span></div>
+      <div className="entry-bottom"><button className="white-cta" onClick={next}>{c.start}</button><span>{c.entryFoot}</span></div>
     </div>
   )
 }
 
-function RoleSelect({ go, actions }: NavProps) {
-  const [role, setRole] = useState<'tenant' | 'landlord'>('tenant')
-  const start = () => {
-    actions.selectRole(role)
-    go('wallet')
-  }
-
+function RoleSelect({ go, actions, lang }: NavProps) {
+  const [role, setRole] = useState<UserRole>('tenant')
+  const c = copy[lang]
+  const start = () => { actions.selectRole(role); go('wallet') }
   return (
     <Page>
       <div className="role-page">
-        <Hero title={'어떤 계약을\n시작할까요?'} desc="역할에 맞는 화면으로 안내할게요." />
-        <div className="role-select-list" aria-label="역할 선택">
-          <button className={role === 'tenant' ? 'active' : ''} onClick={() => setRole('tenant')}>
-            <span>임차인</span>
-            <strong>보증금을 안전하게 맡길래요</strong>
-            <small>계약 확인, 보증금 락업, 자동 반환</small>
-          </button>
-          <button className={role === 'landlord' ? 'active' : ''} onClick={() => setRole('landlord')}>
-            <span>임대인</span>
-            <strong>계약과 정산을 관리할래요</strong>
-            <small>계약 확인, 월세 정산, 반환 승인</small>
-          </button>
+        <Hero title={c.roleTitle} desc={c.roleDesc} />
+        <div className="role-select-list" aria-label={c.roleTitle}>
+          <button className={role === 'tenant' ? 'active' : ''} onClick={() => setRole('tenant')}><span>{c.tenant}</span><strong>{c.tenantRoleTitle}</strong><small>{c.tenantRoleDesc}</small></button>
+          <button className={role === 'landlord' ? 'active' : ''} onClick={() => setRole('landlord')}><span>{c.landlord}</span><strong>{c.landlordRoleTitle}</strong><small>{c.landlordRoleDesc}</small></button>
         </div>
-        <div className="entry-bottom role-bottom"><button className="white-cta" onClick={start}>시작하기</button><span>{role === 'tenant' ? '임차인 계약 플로우로 시작' : '임대인 계약 플로우로 시작'}</span></div>
+        <div className="entry-bottom role-bottom"><button className="white-cta" onClick={start}>{c.start}</button><span>{role === 'tenant' ? c.tenantFlow : c.landlordFlow}</span></div>
       </div>
     </Page>
   )
 }
 
-function WalletConnect({ go, app, actions, error }: NavProps) {
+function WalletConnect({ go, app, actions, error, busy, lang }: NavProps) {
+  const c = copy[lang]
   const [connecting, setConnecting] = useState(false)
   const isTenant = app.selectedRole === 'tenant'
   const address = isTenant ? app.tenantAddress : app.landlordAddress
-  const shortAddress = `${address.slice(0, 6)}...${address.slice(-6)}`
+  const shortAddress = address ? shortHash(address) : ''
   const continueToRole = () => go(isTenant ? 't02' : 'l01')
   const connect = async () => {
     setConnecting(true)
-    try {
-      await actions.connectWallet()
-    } finally {
-      setConnecting(false)
-    }
+    try { await actions.connectWallet() } finally { setConnecting(false) }
   }
-
   return (
     <Page>
       <div className="wallet-page">
-        <Hero
-          title={'BlueSafe 지갑을\n준비해요'}
-          desc={isTenant ? '보증금을 안전하게 보관할 내부 XRPL 지갑이에요.' : '계약과 정산을 확인할 내부 XRPL 지갑이에요.'}
-        />
-        <div className="wallet-visual" aria-hidden="true">
-          <div className="wallet-orbit">
-            <span />
-            <span />
-            <strong>XRPL</strong>
-          </div>
-        </div>
-        <div className="wallet-card">
-          <div>
-            <span>{app.walletConnected ? '연결 완료' : '연결 대기'}</span>
-            <strong>{app.walletConnected ? shortAddress : '내부 XRPL 지갑을 생성해주세요'}</strong>
-            <p>{app.walletConnected ? `${app.walletProvider} · ${app.walletNetwork || 'XRPL'} · 서버 보관` : 'BlueSafe 서버가 지갑을 만들고 주소만 앱에 연결해요.'}</p>
-          </div>
-        </div>
-        <div className="wallet-points">
-          <span>멀티시그 보관</span>
-          <span>온체인 영수증</span>
-          <span>자동 반환 추적</span>
-        </div>
+        <Hero title={c.walletTitle} desc={isTenant ? c.walletTenantDesc : c.walletLandlordDesc} />
+        <div className="wallet-visual" aria-hidden="true"><div className="wallet-orbit"><span /><span /><strong>XRPL</strong></div></div>
+        <div className="wallet-card"><div><span>{app.walletConnected ? c.walletConnected : c.walletPending}</span><strong>{app.walletConnected ? shortAddress : c.walletCreate}</strong><p>{app.walletConnected ? `${app.walletProvider} · ${app.walletNetwork || 'XRPL'} · ${c.walletCustody}` : c.walletServer}</p></div></div>
+        <div className="wallet-points"><span>{c.walletPoint1}</span><span>{c.walletPoint2}</span><span>{c.walletPoint3}</span></div>
         {error && <p className="wallet-error">{error}</p>}
-        <div className="entry-bottom wallet-bottom">
-          <button className="white-cta" onClick={app.walletConnected ? continueToRole : connect}>
-            {app.walletConnected ? '계속하기' : connecting ? '준비 중' : '내 지갑 만들기'}
-          </button>
-          <span>{isTenant ? '임차인 플로우로 이어져요' : '임대인 플로우로 이어져요'}</span>
-        </div>
+        <div className="entry-bottom wallet-bottom"><button className="white-cta" onClick={app.walletConnected ? continueToRole : connect}>{app.walletConnected ? c.continue : connecting || busy ? c.walletConnecting : c.walletConnect}</button><span>{isTenant ? c.tenantFlow : c.landlordFlow}</span></div>
       </div>
     </Page>
   )
 }
 
-function T02Onboarding({ next }: NavProps) {
+function T02Onboarding({ next, lang }: NavProps) {
+  const c = copy[lang]
   const [slide, setSlide] = useState(0)
   const slides = [
-    {
-      eyebrow: '01 · LOCKUP',
-      title: '보증금이\n에스크로에 잠겨요',
-      desc: '계약 기간 동안 임대인도, 임차인도\n중간에 꺼낼 수 없어요.',
-      visual: <VaultDiagram />,
-    },
-    {
-      eyebrow: '02 · RETURN',
-      title: '퇴실 후\n자동으로 돌아와요',
-      desc: '집주인이 응답하지 않아도\n7일 뒤 보증금이 자동 반환돼요.',
-      visual: <ExamplePanel kind="return" />,
-    },
-    {
-      eyebrow: '03 · BILLS',
-      title: '공과금을\n자동으로 비교해요',
-      desc: '평년보다 높은 청구는\n근거 자료로 기록해둘 수 있어요.',
-      visual: <ExamplePanel kind="bills" />,
-    },
-    {
-      eyebrow: '04 · PROOF',
-      title: '모든 기록은\n직접 확인할 수 있어요',
-      desc: '보증금 락업과 반환 기록은\nXRPL Explorer에서 확인돼요.',
-      visual: <ExamplePanel kind="proof" />,
-    },
+    { title: c.onboarding1Title, desc: c.onboarding1Desc, visual: <VaultDiagram lang={lang} /> },
+    { title: c.onboarding2Title, desc: c.onboarding2Desc, visual: <ExamplePanel kind="return" lang={lang} /> },
+    { title: c.onboarding3Title, desc: c.onboarding3Desc, visual: <ExamplePanel kind="bills" lang={lang} /> },
+    { title: c.onboarding4Title, desc: c.onboarding4Desc, visual: <ExamplePanel kind="proof" lang={lang} /> },
   ]
   const current = slides[slide]
   const isLast = slide === slides.length - 1
+  return <Page><div className="skip-row"><button>{c.skip}</button></div><Hero title={current.title} desc={current.desc} />{current.visual}<Dots active={slide} count={slides.length} /><BottomCTA label={isLast ? c.tossAuth : c.next} onClick={() => isLast ? next() : setSlide(slide + 1)} /></Page>
+}
 
+function T03Auth({ next, lang }: NavProps) {
+  const c = copy[lang]
+  const [open, setOpen] = useState(false)
   return (
     <Page>
-      <div className="skip-row"><button>건너뛰기</button></div>
-      <Hero title={current.title} desc={current.desc} />
-      {current.visual}
-      <Dots active={slide} count={slides.length} />
-      <BottomCTA label={isLast ? '토스로 인증하기' : '다음'} onClick={() => isLast ? next() : setSlide(slide + 1)} />
+      <Hero title={c.authTitle} desc={c.authDesc} />
+      <Card tone="soft"><div className="auth-row"><IconBox><ShieldIcon /></IconBox><div><strong>{c.authSafe}</strong><span>{c.authSafeDesc}</span></div></div></Card>
+      <SectionTitle>{c.authInfo}</SectionTitle>
+      <ListItem icon={<CheckIcon />} title={c.nameBirth} desc={c.nameBirthDesc} />
+      <ListItem icon={<CheckIcon />} title={c.regNumber} desc={c.regNumberDesc} />
+      <ListItem icon={<CheckIcon />} title={c.ownerAccount} desc={c.ownerAccountDesc} />
+      <p className="notice">{c.authNotice}</p>
+      <BottomCTA label={c.tossAuth} secondary={c.terms} onClick={() => setOpen(true)} />
+      <ActionModal open={open} title={c.authDone} onClose={() => setOpen(false)} primaryLabel={c.next} onPrimary={next}><p>{c.authSafeDesc}</p><Info label="role" value="tenant" /></ActionModal>
     </Page>
   )
 }
 
-function T03Auth({ next }: NavProps) {
-  const [open, setOpen] = useState(false)
+function T04Kyc({ next, lang }: NavProps) {
+  const c = copy[lang]
+  return <Page><StepperHeader current={0} /><Hero title={c.kycTitle} desc={c.kycDesc} /><div className="camera-card"><div>{c.kycDesc}</div></div><SectionTitle>{c.checklist}</SectionTitle><Checklist items={[c.kyc1, c.kyc2, c.kyc3]} /><BottomCTA label={c.takePhoto} onClick={next} /></Page>
+}
+
+function T05Invite({ next, lang }: NavProps) {
+  const c = copy[lang]
   return (
     <Page>
-      <Hero title={'토스로\n간편하게 인증하기'} desc="본인 확인을 위해 한 번만 거치면 돼요" />
-      <Card tone="soft"><div className="auth-row"><IconBox><ShieldIcon /></IconBox><div><strong>안전한 본인확인</strong><span>주민등록·외국인등록 정보를 사용해요</span></div></div></Card>
-      <SectionTitle>BlueSafe가 받아오는 정보</SectionTitle>
-      <ListItem icon={<CheckIcon />} title="이름·생년월일" desc="계약서 자동 채우기에 사용" />
-      <ListItem icon={<CheckIcon />} title="외국인등록번호" desc="KYC 1단계 통과" />
-      <ListItem icon={<CheckIcon />} title="본인 명의 계좌" desc="보증금 입출금 검증" />
-      <p className="notice">토스 약관에 따라 안전하게 처리돼요. BlueSafe 서버에는 암호화돼서 보관돼요.</p>
-      <BottomCTA label="토스로 인증하기" secondary="약관 전체 보기" onClick={() => setOpen(true)} />
-      <ActionModal open={open} title="토스 인증 완료" onClose={() => setOpen(false)} primaryLabel="다음" onPrimary={next}>
-        <p>본인 확인 토큰을 받았다고 가정하고 다음 단계로 이동해요. 실제 연동 시에는 BE2 인증 헤더에 사용할 토큰을 저장하면 돼요.</p>
-        <Info label="role" value="tenant" />
-        <Info label="auth" value="ready" />
-      </ActionModal>
+      <Hero title={c.inviteTitle} desc={c.inviteDesc} />
+      <Card tone="soft"><Info label={c.inviteLink} value="bluesafe.app/r/live-link-required" mono /><div className="chip-wrap"><span className="chip">{c.copy}</span><span className="chip">{c.kakao}</span><span className="chip">{c.sms}</span></div></Card>
+      <SectionTitle>{c.landlordTodo}</SectionTitle>
+      <Timeline items={[`${c.inviteStep1}|${c.inviteStep1Desc}`, `${c.inviteStep2}|${c.inviteStep2Desc}`, `${c.inviteStep3}|${c.inviteStep3Desc}`]} />
+      <BottomCTA label={c.sendKakao} secondary={c.later} onClick={next} />
     </Page>
   )
 }
 
-function T04Kyc({ next }: NavProps) {
-  const [fileName, setFileName] = useState('')
+function T06Contract({ next, actions, busy, error, app, lang }: NavProps) {
+  const c = copy[lang]
   const [open, setOpen] = useState(false)
-  const onFile = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (!file) return
-    setFileName(file.name)
-    setOpen(true)
-  }
+  const create = async () => { try { await actions.createDraftContract(); setOpen(true) } catch { return } }
   return (
-    <Page>
-      <StepperHeader current={1} />
-      <Hero title={'외국인 등록증을\n업로드해요'} />
-      <div className="camera-card"><div>여기에 카드를 맞춰요</div></div>
-      <input className="hidden-input" id="arc-file" type="file" accept="image/png,image/jpeg,image/webp,application/pdf" onChange={onFile} />
-      <SectionTitle>확인 항목</SectionTitle>
-      <Checklist items={['카드 전체가 프레임에 들어왔는지', '글자가 흐릿하지 않은지', '뒷면 칩이 보이지 않는지 (선택)']} />
-      <BottomCTA label={fileName || '촬영하기'} onClick={() => document.getElementById('arc-file')?.click()} />
-      <ActionModal open={open} title="등록증 파일 확인" onClose={() => setOpen(false)} primaryLabel="다음" onPrimary={next}>
-        <p>{fileName} 파일을 확인했어요. 실제 OCR/KYC API가 생기면 여기서 업로드 후 검증 결과를 받아오면 됩니다.</p>
-      </ActionModal>
+    <Page bottomNav>
+      <Hero title={c.contractTitle} desc={c.contractDesc} />
+      <Card tone="soft">
+        <Info label={c.contractId} value={app.contract?.id ?? c.responseNone} mono={Boolean(app.contract?.id)} />
+        <Info label={c.status} value={statusText(app.contract?.status, lang)} />
+        <Info label={c.period} value={dateRange(app.contract?.startsAt, app.contract?.endsAt, lang)} />
+        <Info label={c.deposit} value={app.contract?.depositAmount ?? c.responseNone} />
+      </Card>
+      <BackendInline error={error} />
+      <BottomCTA label={busy ? c.responseWaiting : app.contract ? c.signContinue : c.createContract} onClick={app.contract ? next : create} />
+      <ActionModal open={open} title={c.contractTitle} onClose={() => setOpen(false)} primaryLabel={c.next} onPrimary={next}><p>{app.contract?.id ?? c.responseWaiting}</p></ActionModal>
     </Page>
   )
 }
 
-function T05Invite({ next }: NavProps) {
-  const [open, setOpen] = useState(false)
-  const inviteLink = 'bluesafe.app/r/8KQ-91D-LM2'
-  const copyInvite = async () => {
-    await navigator.clipboard?.writeText(inviteLink).catch(() => undefined)
-    setOpen(true)
-  }
-  return (
-    <Page>
-      <Hero title={'집주인을\n초대해요'} desc="카카오·문자 어디로든 보낼 수 있어요" />
-      <Card tone="soft"><div className="copy-link"><span>초대 링크</span><strong>{inviteLink}</strong><button onClick={copyInvite}>복사</button></div><div className="share-row"><button onClick={() => setOpen(true)}>카카오톡</button><button onClick={() => setOpen(true)}>문자</button></div></Card>
-      <SectionTitle>집주인이 할 일</SectionTitle>
-      <ListItem icon="1" title="링크 클릭 → 토스 인증" desc="같은 BlueSafe 미니앱이 열려요" />
-      <ListItem icon="2" title="계약서 확인 + 서명" desc="평균 4분" />
-      <ListItem icon="3" title="보증금 받기 계좌 등록" desc="본인 명의만 가능" />
-      <BottomCTA label="카카오톡으로 보내기" secondary="나중에" onClick={next} />
-      <ActionModal open={open} title="초대 링크 준비 완료" onClose={() => setOpen(false)} primaryLabel="계속" onPrimary={next}>
-        <p>집주인이 이 링크로 들어오면 BE2 계약 draft에 landlord 인증 상태를 연결하는 흐름으로 이어지면 돼요.</p>
-        <Info label="invite" value={inviteLink} mono />
-      </ActionModal>
-    </Page>
-  )
-}
-
-function T06Contract({ next, actions, busy, error, app }: NavProps) {
-  const [open, setOpen] = useState(false)
-  const signContract = async () => {
-    try {
-      await actions.createDraftContract()
-      setOpen(true)
-    } catch {
-      return
-    }
-  }
-  return <Page><Hero title="Contract check" desc="Only BE2 contract response is shown. No fixed lease terms." /><Card tone="soft"><Info label="Contract ID" value={app.contract?.id ?? 'No response'} mono={Boolean(app.contract?.id)} /><Info label="Status" value={app.contract?.status ?? 'No response'} /><Info label="Deposit" value={app.contract?.depositAmount ?? 'No amount response'} /><Info label="Start" value={app.contract?.startsAt ? formatDate(new Date(app.contract.startsAt)) : 'No date response'} /><Info label="End" value={app.contract?.endsAt ? formatDate(new Date(app.contract.endsAt)) : 'No date response'} /></Card><SectionTitle>Required data</SectionTitle><ListItem icon={<ReceiptIcon />} title="Contract terms" desc={app.contract ? 'BE2 contract response exists' : 'No BE2 contract response'} action={app.contract ? 'OK' : 'Waiting'} /><ListItem icon={<WalletIcon />} title="Escrow inputs" desc={app.contract?.depositAmount && app.contract?.startsAt && app.contract?.endsAt ? 'Ready' : 'Amount and dates required'} action="BE1" /><BackendInline error={error} /><BottomCTA label={busy ? 'Creating contract' : 'Create contract'} onClick={signContract} /><ActionModal open={open} title="Contract created" onClose={() => setOpen(false)} primaryLabel="Continue" onPrimary={next}><p>BE2 contract response was saved. Amount and dates are required before creating XRPL escrow.</p></ActionModal></Page>
-}
-function T07Pay({ next, actions, busy, error, app }: NavProps) {
+function T07Pay({ next, actions, busy, error, app, lang }: NavProps) {
+  const c = copy[lang]
+  const amount = app.contract?.depositAmount
   const hasTenantWallet = Boolean(app.tenantAddress)
   const hasLandlordWallet = Boolean(app.landlordAddress)
   const canRunEscrow = hasTenantWallet && hasLandlordWallet
   return (
     <Page>
-      <Hero title="XRPL 에스크로 확인" desc="실제 지갑 주소와 백엔드 응답이 준비됐을 때만 실행해요" />
-      <div className="amount-panel">
-        <strong>{app.contract ? '계약 생성됨' : '계약 생성 전'}</strong>
-        <Info label="BE2 계약 ID" value={app.contract?.id ?? '아직 없음'} mono={Boolean(app.contract?.id)} />
-        <Info label="임차인 지갑" value={app.tenantAddress ? shortHash(app.tenantAddress) : '연결 필요'} mono={hasTenantWallet} />
-        <Info label="임대인 지갑" value={app.landlordAddress ? shortHash(app.landlordAddress) : '연결 필요'} mono={hasLandlordWallet} />
-      </div>
-      <SectionTitle>실행 조건</SectionTitle>
-      <ListItem icon={<WalletIcon />} title="내부 XRPL 지갑" desc={canRunEscrow ? '양쪽 주소가 준비됐어요' : '임차인과 임대인 지갑 주소가 모두 필요해요'} />
-      <ListItem icon={<LockIcon />} title="온체인 에스크로" desc="BE1 /contracts 응답이 있어야 완료 상태로 표시해요" />
-      <BackendInline error={error} />
-      <BottomCTA label={busy ? '에스크로 생성 중' : 'XRPL 에스크로 생성'} onClick={async () => { try { await actions.lockDeposit(); next() } catch { return } }} />
-    </Page>
-  )
-}
-
-function T08Receipt({ next, app }: NavProps) {
-  const txHash = app.xrplContract?.depositEscrowTxHash ?? app.contract?.depositEscrowTxHash
-  const account = app.xrplContract?.contractAccountAddress
-  const [open, setOpen] = useState(false)
-  return (
-    <Page>
-      <Hero title="에스크로 결과" desc="BE1이 반환한 온체인 값만 표시해요" />
-      <Card>
-        <Info label="BE1 계약 ID" value={app.xrplContract?.id ?? '응답 없음'} mono={Boolean(app.xrplContract?.id)} />
-        <Info label="BE2 계약 ID" value={app.contract?.id ?? '응답 없음'} mono={Boolean(app.contract?.id)} />
-        <Info label="XRPL TX" value={txHash ? shortHash(txHash) : '응답 없음'} mono={Boolean(txHash)} />
-        <Info label="Escrow Account" value={account ?? '응답 없음'} mono={Boolean(account)} />
+      <Hero title={c.escrowTitle} desc={c.escrowDesc} />
+      <Card tone="soft">
+        <Info label={c.depositAmount} value={amount ?? c.responseNone} strong={Boolean(amount)} />
+        <Info label={c.stake} value={app.contract?.stakeAmount ?? c.responseNone} />
+        <Info label={c.tenantWallet} value={app.tenantAddress ? shortHash(app.tenantAddress) : c.walletNeeded} mono={hasTenantWallet} />
+        <Info label={c.landlordWallet} value={app.landlordAddress ? shortHash(app.landlordAddress) : c.walletNeeded} mono={hasLandlordWallet} />
       </Card>
-      <button className="card blue action-card" disabled={!txHash} onClick={() => setOpen(true)}><strong>온체인 영수증</strong><span>{txHash ? '실제 TX 확인' : '아직 생성되지 않음'}</span></button>
-      <BottomCTA label="홈으로" secondary="공유" onClick={next} />
-      <ActionModal open={open} title="XRPL 영수증" onClose={() => setOpen(false)} primaryLabel="확인" onPrimary={() => setOpen(false)}>
-        <p>현재 백엔드에서 받은 실제 온체인 응답입니다.</p>
-        <Info label="tx" value={txHash ?? '없음'} mono={Boolean(txHash)} />
-        <Info label="account" value={account ?? '없음'} mono={Boolean(account)} />
-      </ActionModal>
+      <ListItem icon={<WalletIcon />} title={c.internalWallet} desc={canRunEscrow ? c.walletBothReady : c.walletBothNeeded} />
+      <BackendInline error={error} />
+      <BottomCTA label={busy ? c.creatingEscrow : c.createEscrow} onClick={async () => { try { await actions.lockDeposit(); next() } catch { return } }} />
     </Page>
   )
 }
 
-function T09Home({ go, app, error }: NavProps) {
-  const lease = getLeaseMetrics(app)
-  const hasContract = Boolean(app.contract || app.xrplContract)
-  const hasLeaseDates = Boolean(lease)
-  const statusLabel = app.xrplContract?.status ?? app.contract?.status ?? '연동 대기'
+function T08Receipt({ next, app, lang }: NavProps) {
+  const c = copy[lang]
   const txHash = app.xrplContract?.depositEscrowTxHash ?? app.contract?.depositEscrowTxHash
-  const progress = lease?.progress ?? 0
-  const daysLeft = lease?.daysLeft ?? 0
-  const livedDays = lease?.livedDays ?? 0
+  return <Page><Hero title={c.receiptTitle} desc={c.receiptDesc} /><Card tone="soft"><Info label="BE1" value={app.xrplContract?.id ?? c.responseNone} mono={Boolean(app.xrplContract?.id)} /><Info label={c.contractId} value={app.contract?.id ?? c.responseNone} mono={Boolean(app.contract?.id)} /><Info label={c.tx} value={txHash ? shortHash(txHash) : c.responseNone} mono={Boolean(txHash)} /><Info label={c.status} value={statusText(app.xrplContract?.status ?? app.contract?.status, lang)} /></Card><BottomCTA label={c.home} secondary={c.share} onClick={next} /></Page>
+}
 
+function T09Home({ go, app, error, lang }: NavProps) {
+  const c = copy[lang]
+  const contract = app.contract ?? app.xrplContract
+  const metrics = getLeaseMetrics(app)
+  const deposit = contract?.depositAmount ?? '--'
+  const daysLeft = metrics ? `${metrics.daysLeft}` : '--'
+  const livedDays = metrics ? `${metrics.livedDays}${lang === 'ko' ? '일차' : ' days'}` : '--'
+  const txHash = app.xrplContract?.depositEscrowTxHash ?? app.contract?.depositEscrowTxHash
+  const progressStyle = { '--progress': `${metrics?.progress ?? 0}%` } as CSSProperties
   return (
     <Page bottomNav>
       <div className="home-head"><span>BlueSafe</span></div>
-      <BackendStatus app={app} error={error} />
+      <BackendStatus app={app} error={error} lang={lang} />
       <div className="home-summary">
-        <div className="deposit-card">
-          <span>현재 상태</span>
-          <strong>{statusLabel}</strong>
-          <p>{txHash ? 'XRPL 에스크로가 생성됐어요' : hasContract ? '계약은 생성됐고 에스크로 대기 중이에요' : '백엔드 계약 응답을 기다리고 있어요'}</p>
-        </div>
-        <div className="contract-card">
-          <div className="progress-ring" style={{ '--progress': (hasLeaseDates ? String(progress) : '0') + '%' } as CSSProperties} aria-label="계약 진행률">
-            <strong>{hasLeaseDates ? daysLeft : '-'}</strong>
-            <span>일 남음</span>
-          </div>
-          <p>{hasLeaseDates ? '계약 만료까지' : '날짜 응답 없음'}</p>
-        </div>
-        <div className="living-card">
-          <span>거주</span>
-          <strong>{hasLeaseDates ? String(livedDays) + '일차' : '--'}</strong>
-        </div>
-        <div className="quick-grid"><button onClick={() => go('t11')}>리포트</button><button onClick={() => go('t06')}>계약</button><button onClick={() => go('t10')}>반환</button><button onClick={() => go('t12')}>내정보</button></div>
+        <div className="deposit-card"><span>{c.homeDeposit}</span><strong>{deposit}</strong><p>{c.safeMultisig}</p></div>
+        <div className="progress-card"><div className="progress-ring" style={progressStyle}><strong>{daysLeft}</strong><span>{c.daysLeft}</span></div><p>{c.untilExpiry}</p></div>
+        <div className="living-card"><span>{c.living}</span><strong>{livedDays}</strong></div>
+        <div className="quick-grid"><button onClick={() => go('t11')}>{c.report}</button><button onClick={() => go('t06')}>{c.contract}</button><button onClick={() => go('t10')}>{c.return}</button><button onClick={() => go('t12')}>{c.profile}</button></div>
       </div>
       <div className="home-tasks">
-        <SectionTitle right="전체">오늘 할 일</SectionTitle>
-        {hasContract ? <>
-          <ListItem icon={<AlertIcon />} title="계약 상태 확인" desc={statusLabel} />
-          <ListItem icon={<img src={reputationMascot} alt="" className="mini-asset" />} title="XRPL 에스크로" desc={txHash ? shortHash(txHash) : '온체인 생성 전이에요'} />
-        </> : <Card tone="soft"><strong>아직 계약 데이터가 없어요</strong><span>임차인/임대인 지갑 연결 후 실제 백엔드 계약을 생성해 주세요.</span></Card>}
+        <SectionTitle right={c.all}>{c.todayTodo}</SectionTitle>
+        {contract ? <>
+          <ListItem icon={<AlertIcon />} title={statusText(contract.status, lang)} desc={txHash ? c.escrowCreated : c.escrowPending} />
+          <ListItem icon={<img src={reputationMascot} alt="" className="mini-asset" />} title={c.be1EscrowResponse} desc={txHash ? shortHash(txHash) : c.responseWaiting} />
+        </> : <Card tone="soft"><strong>{c.noTodo}</strong><span>{c.noTodoDesc}</span></Card>}
       </div>
-      <div className="screen-fill" />
+      <BottomSpace />
     </Page>
   )
 }
 
-function T10Countdown({ app, actions }: NavProps) {
-  const lease = getLeaseMetrics(app)
+function T10Countdown({ app, actions, lang }: NavProps) {
+  const c = copy[lang]
+  const metrics = getLeaseMetrics(app)
+  const finishAfter = metrics?.finishAfter
+  const left = metrics?.returnLeft
   const settlement = app.settlements[0]
-  const hasContract = Boolean(app.contract || app.xrplContract)
-  const hasLeaseDates = Boolean(lease)
-  const didLoadSettlements = useRef(false)
-  const returnLeft = lease?.returnLeft
-  const progress = lease?.progress ?? 0
-  const finishAfter = lease?.finishAfter
-
-  useEffect(() => {
-    if (didLoadSettlements.current) return
-    didLoadSettlements.current = true
-    void actions.loadSettlements()
-  }, [actions])
-
-  return (
-    <Page>
-      <Hero title="자동 반환까지" desc="계약 날짜와 정산 응답이 있을 때만 진행률을 계산해요" />
-      <div className="time-grid"><TimeBox value={returnLeft ? pad2(returnLeft.days) : '--'} label="일" /><TimeBox value={returnLeft ? pad2(returnLeft.hours) : '--'} label="시간" /><TimeBox value={returnLeft ? pad2(returnLeft.minutes) : '--'} label="분" /></div>
-      <div className="return-progress">
-        <div className="return-progress-head"><span>계약 진행률</span><strong>{hasLeaseDates ? String(progress) + '%' : '대기'}</strong></div>
-        <div className="return-track"><span style={{ width: (hasLeaseDates ? String(progress) : '0') + '%' }} /><b className="safe-emoji" aria-label="money">💸</b></div>
-      </div>
-      <Card tone="blue"><strong>{settlement ? '정산 상태: ' + settlement.status : hasContract ? '정산 응답 대기 중' : '계약 응답 없음'}</strong><span>{finishAfter ? formatDate(finishAfter) + ' 이후 반환 조건을 확인해요.' : '계약 날짜 또는 BE2 settlement 응답이 필요해요.'}</span></Card>
-      <SectionTitle>진행 상황</SectionTitle>
-      <Timeline items={lease ? [
-        '계약 시작|' + formatDate(lease.startsAt),
-        '계약 만료|' + formatDate(lease.endsAt),
-        '자동 반환 대기|' + (lease.returnLeft.totalMs > 0 ? String(lease.returnLeft.days) + '일 남음' : '반환 조건 확인'),
-        '정산 응답|' + formatDate(lease.finishAfter) + ' 이후',
-      ] : ['계약 날짜|응답 없음', 'XRPL 에스크로|응답 없음', '정산 상태|응답 없음']} />
-    </Page>
-  )
+  useEffect(() => { void actions.loadSettlements() }, [])
+  return <Page><Hero title={c.countdownTitle} desc={c.countdownDesc} /><div className="time-grid"><TimeBox value={left ? pad2(left.days) : '--'} label={c.day} /><TimeBox value={left ? pad2(left.hours) : '--'} label={c.hour} /><TimeBox value={left ? pad2(left.minutes) : '--'} label={c.minute} /></div><Card tone="blue"><strong>{c.noAction}</strong><span>{finishAfter ? `${formatDate(finishAfter)} ${c.returnPrepDesc}` : c.noActionDesc}</span></Card><SectionTitle>{c.progress}</SectionTitle><Timeline items={settlement ? [`${c.settlementResponse}|${statusText(settlement.status, lang)}`, `${c.returnPrep}|${settlement.id}`] : [`${c.period}|${dateRange(app.contract?.startsAt, app.contract?.endsAt, lang)}`, `${c.tx}|${app.xrplContract?.depositEscrowTxHash ? shortHash(app.xrplContract.depositEscrowTxHash) : c.responseNone}`, `${c.settlementStatus}|${c.responseNone}`]} /></Page>
 }
 
-function T11Report({ app }: NavProps) {
+function T11Report({ app, lang }: NavProps) {
+  const c = copy[lang]
   const hasContract = Boolean(app.contract || app.xrplContract)
   const hasSettlement = app.settlements.length > 0
-  return <Page><Hero title="Safety report" desc="Only live contract and settlement signals are listed." /><Card tone="soft"><strong>No report score yet</strong><span>A backend scoring API is required before score and delta can be displayed.</span></Card><SectionTitle>Signals</SectionTitle><ListItem icon={<ReceiptIcon />} title="Contract" desc={hasContract ? app.contract?.status ?? app.xrplContract?.status ?? 'Response exists' : 'No response'} action={hasContract ? 'OK' : 'Waiting'} /><ListItem icon={<WalletIcon />} title="Settlement" desc={hasSettlement ? app.settlements[0]?.status ?? 'Response exists' : 'No response'} action={hasSettlement ? 'OK' : 'Waiting'} /></Page>
+  return <Page><Hero title={c.reportTitle} desc={c.reportDesc} /><Card tone="soft"><strong>{c.noScore}</strong><span>{c.noScoreDesc}</span></Card><SectionTitle>{c.signals}</SectionTitle><ListItem icon={<ReceiptIcon />} title={c.contract} desc={hasContract ? statusText(app.contract?.status ?? app.xrplContract?.status, lang) : c.responseNone} action={hasContract ? c.complete : c.waiting} /><ListItem icon={<WalletIcon />} title={c.settlement} desc={hasSettlement ? statusText(app.settlements[0]?.status, lang) : c.responseNone} action={hasSettlement ? c.complete : c.waiting} /></Page>
 }
-function T12Reputation({ next, app }: NavProps) {
+
+function T12Reputation({ go, app, lang }: NavProps) {
+  const c = copy[lang]
   const hasContract = Boolean(app.contract || app.xrplContract)
-  return <Page><Hero title="Reputation data" desc="Backend reputation scoring is required." /><Card tone="soft"><strong>No reputation grade yet</strong><span>Score and grade will appear only after the backend scoring API is connected.</span></Card><SectionTitle>Required signals</SectionTitle><ListItem icon={<ReceiptIcon />} title="Contract history" desc={hasContract ? 'Contract response exists' : 'No BE2 contract response'} action={hasContract ? 'OK' : 'Waiting'} /><ListItem icon={<ShieldIcon />} title="Escrow history" desc={app.xrplContract ? 'BE1 escrow response exists' : 'No BE1 escrow response'} action={app.xrplContract ? 'OK' : 'Waiting'} /><BottomCTA label="Home" secondary="Share disabled" onClick={next} /></Page>
+  return <Page><Hero title={c.reputationTitle} desc={c.reputationDesc} /><Card tone="soft"><strong>{c.noGrade}</strong><span>{c.noGradeDesc}</span></Card><SectionTitle>{c.requiredSignals}</SectionTitle><ListItem icon={<ReceiptIcon />} title={c.contractHistory} desc={hasContract ? c.be2ContractResponse : c.responseNone} action={hasContract ? c.complete : c.waiting} /><ListItem icon={<ShieldIcon />} title={c.escrowHistory} desc={app.xrplContract ? c.be1EscrowResponse : c.responseNone} action={app.xrplContract ? c.complete : c.waiting} /><BottomCTA label={c.home} secondary={c.share} onClick={() => go('t09')} /></Page>
 }
-function T13Bills({ go }: NavProps) {
-  return <Page bottomNav><Hero title="Utility" desc="This flow is disabled in the current product build." /><Card tone="soft"><strong>Utility flow disabled</strong><span>Only contract, wallet, escrow, settlement, and remittance flows remain active.</span></Card><BottomCTA label="Home" secondary="Later" onClick={() => go('t09')} /></Page>
+
+function T13Bills({ go, lang }: NavProps) {
+  const c = copy[lang]
+  return <Page bottomNav><Hero title={c.utilityTitle} desc={c.utilityDesc} /><Card tone="soft"><strong>{c.utilityDisabled}</strong><span>{c.utilityDisabledDesc}</span></Card><BottomCTA label={c.home} secondary={c.later} onClick={() => go('t09')} /></Page>
 }
-function T17Moveout({ next, app }: NavProps) {
+
+function T17Moveout({ next, app, lang }: NavProps) {
+  const c = copy[lang]
   const hasSettlement = app.settlements.length > 0
-  return <Page><Hero title="Move-out checklist" desc="Only settlement response is checked." /><ListItem icon={<WalletIcon />} title="Settlement response" desc={hasSettlement ? app.settlements[0]?.status ?? 'Settlement response exists' : 'No settlement response'} action={hasSettlement ? 'OK' : 'Waiting'} /><Card tone="soft"><strong>Return preparation</strong><span>Deposit return flow will appear after BE2 settlement response exists.</span></Card><BottomCTA label="Check settlement" onClick={next} /></Page>
+  return <Page><Hero title={c.moveoutTitle} desc={c.moveoutDesc} /><ListItem icon={<WalletIcon />} title={c.settlementResponse} desc={hasSettlement ? statusText(app.settlements[0]?.status, lang) : c.responseNone} action={hasSettlement ? c.complete : c.waiting} /><Card tone="soft"><strong>{c.returnPrep}</strong><span>{c.returnPrepDesc}</span></Card><BottomCTA label={c.checkSettlement} onClick={next} /></Page>
 }
-function T18Returned({ next, app }: NavProps) {
+
+function T18Returned({ next, app, lang }: NavProps) {
+  const c = copy[lang]
   const settlement = app.settlements[0]
-  return <Page><Hero title="Deposit return" desc="Return amount is shown only from actual settlement response." />{settlement ? <Card><Info label="Settlement ID" value={settlement.id} mono /><Info label="Status" value={settlement.status} /><Info label="Amount" value={settlement.amountMinor ? krw(settlement.amountMinor) : 'No amount response'} strong /></Card> : <Card tone="soft"><strong>No return data</strong><span>BE2 settlement response is required.</span></Card>}<BottomCTA label="Prepare remittance" secondary="Receipt" onClick={next} /></Page>
+  return <Page><Hero title={c.returnedTitle} desc={c.returnedDesc} />{settlement ? <Card><Info label={c.settlementId} value={settlement.id} mono /><Info label={c.status} value={statusText(settlement.status, lang)} /><Info label={c.amount} value={settlement.amountMinor ? krw(settlement.amountMinor, lang) : c.noAmount} strong /></Card> : <Card tone="soft"><strong>{c.noReturnData}</strong><span>{c.noReturnDataDesc}</span></Card>}<BottomCTA label={c.prepareRemittance} secondary={c.onchainReceipt} onClick={next} /></Page>
 }
-function T19Fx({ next, app }: NavProps) {
+
+function T19Fx({ next, app, lang }: NavProps) {
+  const c = copy[lang]
   const settlement = app.settlements[0]
-  return <Page><Hero title="International remittance" desc="Recipient and FX quote appear only after remittance API is connected." /><Card tone="soft"><strong>{settlement ? 'Settlement amount found' : 'No remittance data'}</strong><span>{settlement?.amountMinor ? krw(settlement.amountMinor) : 'Deposit settlement response is required first.'}</span></Card><SectionTitle>Required integration</SectionTitle><ListItem icon={<WalletIcon />} title="Settlement amount" desc={settlement ? settlement.status : 'No BE2 settlement response'} action={settlement ? 'OK' : 'Waiting'} /><ListItem icon={<UserIcon />} title="Recipient" desc="No remittance API response" action="Waiting" /><BottomCTA label="Confirm" onClick={next} /></Page>
+  return <Page><Hero title={c.fxTitle} desc={c.fxDesc} /><Card tone="soft"><strong>{settlement ? c.settlementFound : c.noFxData}</strong><span>{settlement?.amountMinor ? krw(settlement.amountMinor, lang) : c.noReturnDataDesc}</span></Card><SectionTitle>{c.requiredSignals}</SectionTitle><ListItem icon={<WalletIcon />} title={c.settlementTotal} desc={settlement ? statusText(settlement.status, lang) : c.responseNone} action={settlement ? c.complete : c.waiting} /><ListItem icon={<UserIcon />} title={c.recipient} desc={c.recipientWaiting} action={c.waiting} /><BottomCTA label={c.confirm} onClick={next} /></Page>
 }
-function T20Activity({ next, app }: NavProps) {
-  const rows: string[][] = []
-  const today = formatDate(new Date()).slice(5).replace('-', '.')
 
-  if (app.tenantAddress) rows.push(['Runtime status', today, 'Tenant wallet created', shortHash(app.tenantAddress), 'XRPL'])
-  if (app.landlordAddress) rows.push(['', today, 'Landlord wallet created', shortHash(app.landlordAddress), 'XRPL'])
-  if (app.contract) rows.push(['', today, 'BE2 contract response', app.contract.id, app.contract.status])
-  if (app.xrplContract) rows.push(['', today, 'BE1 escrow response', app.xrplContract.id, app.xrplContract.status])
-  if (app.xrplContract?.depositEscrowTxHash) rows.push(['', today, 'XRPL TX created', shortHash(app.xrplContract.depositEscrowTxHash), 'On-chain'])
-  app.settlements.forEach((settlement, index) => {
-    rows.push([index === 0 ? 'Settlement response' : '', today, 'Settlement status', settlement.id, settlement.status])
-  })
-  app.backendEvents.slice().reverse().forEach((event, index) => {
-    rows.push([index === 0 && rows.length === 0 ? 'Runtime log' : '', today, event, 'Frontend runtime', ''])
-  })
+function T20Activity({ next, app, lang }: NavProps) {
+  const c = copy[lang]
+  const rows = buildTenantRows(app, lang)
+  return <Page bottomNav><Hero title={c.activityTitle} desc={c.activityDesc} /><div className="chip-wrap compact"><span className="chip selected">{c.all}</span><span className="chip">{c.walletCreated}</span><span className="chip">{c.contract}</span></div>{rows.length > 0 ? <ActivityRows rows={rows} /> : <Card tone="soft"><strong>{c.activityEmpty}</strong><span>{c.activityEmptyDesc}</span></Card>}<BottomCTA label={c.landlordView} onClick={next} /></Page>
+}
 
-  return (
-    <Page bottomNav>
-      <Hero title="Activity history" desc="Only wallet, contract, escrow, settlement, and runtime events are shown." />
-      <div className="chip-wrap compact"><span className="chip selected">All</span><span className="chip">Wallet</span><span className="chip">Contract</span></div>
-      {rows.length > 0 ? <ActivityRows rows={rows} /> : <Card tone="soft"><strong>No activity yet</strong><span>Wallet and contract events will appear here after successful backend calls.</span></Card>}
-      <BottomCTA label="Landlord view" onClick={next} />
-    </Page>
-  )
+function L01Invited({ next, app, lang }: NavProps) {
+  const c = copy[lang]
+  return <Page><div className="home-head"><span>BlueSafe</span></div><Hero title={c.lStartTitle} desc={c.lStartDesc} /><Card tone="soft"><strong>{app.contract ? c.be2ContractResponse : c.noInvite}</strong><span>{app.contract?.id ?? c.inviteNeeded}</span></Card><BottomCTA label={c.viewContract} secondary={c.later} onClick={next} /></Page>
 }
-function L01Invited({ next, app }: NavProps) {
-  return <Page><div className="home-head"><span>BlueSafe</span></div><Hero title="Start as landlord" desc="Actual contract data is shown only from invite or BE2 contract response." /><Card tone="soft"><strong>{app.contract ? 'Contract response found' : 'No invite data'}</strong><span>{app.contract?.id ?? 'BE2 contract or invite API response is required.'}</span></Card><BottomCTA label="View contract" secondary="Later" onClick={next} /></Page>
-}
-function L02Verify({ next }: NavProps) {
+
+function L02Verify({ next, lang }: NavProps) {
+  const c = copy[lang]
   const [open, setOpen] = useState(false)
-  return <Page><StepperHeader current={0} /><Hero title={'임대인\n인증 종류'} desc="월세 받을 명의를 선택해요" /><ListItem icon="개인" title="개인" desc="주민등록증 본인 명의" /><ListItem icon="사업" title="개인사업자" desc="사업자등록증 + 본인 명의" /><ListItem icon="법인" title="법인" desc="법인 인감 + 대표자 인증" /><p className="notice">월세 수령 계좌는 본인 명의여야 해요. BlueSafe가 자동으로 검증해요.</p><BottomCTA label="토스로 인증하기" onClick={() => setOpen(true)} /><ActionModal open={open} title="임대인 인증 준비 완료" onClose={() => setOpen(false)} primaryLabel="다음" onPrimary={next}><p>실제 Toss/OIDC 토큰이 연결되면 BE2 요청의 landlord role 토큰으로 사용해요.</p><Info label="role" value="landlord" /><Info label="auth" value="ready" /></ActionModal></Page>
+  return <Page><StepperHeader current={0} /><Hero title={c.lVerifyTitle} desc={c.lVerifyDesc} /><ListItem icon="1" title={c.personal} desc={lang === 'ko' ? '주민등록증 본인 명의' : 'Personal ID in your name'} /><ListItem icon="2" title={c.business} desc={lang === 'ko' ? '사업자등록증 + 본인 명의' : 'Business certificate and personal verification'} /><ListItem icon="3" title={c.corporation} desc={lang === 'ko' ? '법인 인감 + 대표자 인증' : 'Corporate seal and representative verification'} /><p className="notice">{c.lVerifyNotice}</p><BottomCTA label={c.tossAuth} onClick={() => setOpen(true)} /><ActionModal open={open} title={c.authDone} onClose={() => setOpen(false)} primaryLabel={c.next} onPrimary={next}><p>{c.lVerifyNotice}</p><Info label="role" value="landlord" /></ActionModal></Page>
 }
 
-function L03Property({ next, app }: NavProps) {
-  return <Page><Hero title="Property data" desc="Address and contract terms require a real property API response." /><Card tone="soft"><strong>No property data</strong><span>{app.contract?.id ? 'Contract ID: ' + app.contract.id : 'BE2 property response is required.'}</span></Card><BottomCTA label="Review contract" onClick={next} /></Page>
+function L03Property({ next, app, lang }: NavProps) {
+  const c = copy[lang]
+  return <Page><Hero title={c.propertyTitle} desc={c.propertyDesc} /><Card tone="soft"><strong>{c.noProperty}</strong><span>{app.contract?.id ? `${c.contractId}: ${app.contract.id}` : c.propertyNeeded}</span></Card><BottomCTA label={c.reviewContract} onClick={next} /></Page>
 }
-function L04Review({ next, actions, busy, error, app }: NavProps) {
+
+function L04Review({ next, actions, busy, error, app, lang }: NavProps) {
+  const c = copy[lang]
   const [open, setOpen] = useState(false)
-  const sign = async () => {
-    try { await actions.landlordSignContract(); setOpen(true) } catch { return }
-  }
-  return <Page><Hero title="Review contract" desc="Only BE2 contract response is used for landlord signing." /><Card tone="soft"><Info label="Contract ID" value={app.contract?.id ?? 'No response'} mono={Boolean(app.contract?.id)} /><Info label="Status" value={app.contract?.status ?? 'No response'} /></Card><BackendInline error={error} /><BottomCTA label={busy ? 'Saving signature' : 'Agree and sign'} secondary="Request edit" onClick={sign} /><ActionModal open={open} title="Agreement saved" onClose={() => setOpen(false)} primaryLabel="Continue" onPrimary={next}><p>BE2 contract status was updated.</p></ActionModal></Page>
+  const sign = async () => { try { await actions.landlordSignContract(); setOpen(true) } catch { return } }
+  return <Page><Hero title={c.reviewContract} desc={c.reviewContractDesc} /><Card tone="soft"><Info label={c.contractId} value={app.contract?.id ?? c.responseNone} mono={Boolean(app.contract?.id)} /><Info label={c.status} value={statusText(app.contract?.status, lang)} /></Card><BackendInline error={error} /><BottomCTA label={busy ? c.savingSignature : c.agreeSign} secondary={c.requestEdit} onClick={sign} /><ActionModal open={open} title={c.agreementSaved} onClose={() => setOpen(false)} primaryLabel={c.continue} onPrimary={next}><p>{c.agreementSavedDesc}</p></ActionModal></Page>
 }
-function L05Signed({ next, app }: NavProps) {
-  return <Page><Hero title="Contract status" desc="No fixed next steps are shown. Only actual contract state." /><Card tone="soft"><Info label="Contract ID" value={app.contract?.id ?? 'No response'} mono={Boolean(app.contract?.id)} /><Info label="Status" value={app.contract?.status ?? 'No response'} /></Card><BottomCTA label="Dashboard" secondary="Contract" onClick={next} /></Page>
+
+function L05Signed({ next, app, lang }: NavProps) {
+  const c = copy[lang]
+  return <Page><Hero title={c.contractStatusTitle} desc={c.contractStatusDesc} /><Card tone="soft"><Info label={c.contractId} value={app.contract?.id ?? c.responseNone} mono={Boolean(app.contract?.id)} /><Info label={c.status} value={statusText(app.contract?.status, lang)} /></Card><BottomCTA label={c.dashboard} secondary={c.contract} onClick={next} /></Page>
 }
-function L06Home({ go, app }: NavProps) {
+
+function L06Home({ go, app, lang }: NavProps) {
+  const c = copy[lang]
   const hasContract = Boolean(app.contract || app.xrplContract)
-  return <Page bottomNav><div className="home-head"><span>BlueSafe</span></div><Hero title="Landlord dashboard" desc="Operational data appears only from contract and settlement responses." /><div className="landlord-summary"><div className="income-card"><span>Contract status</span><strong>{app.contract?.status ?? 'No response'}</strong><p>{app.contract?.id ?? 'No BE2 contract'}</p></div><div className="rent-status-card"><span>Settlement</span><strong>{app.settlements.length}</strong><p>responses</p></div><div className="vacancy-card"><span>XRPL</span><strong>{app.xrplContract ? 'Linked' : 'Waiting'}</strong></div><div className="quick-grid"><button onClick={() => go('l07')}>Property</button><button>Rent</button><button onClick={() => go('l11')}>Settlement</button><button onClick={() => go('l10')}>Report</button></div></div><div className="home-tasks landlord-properties"><SectionTitle right="All">Contracts</SectionTitle>{hasContract ? <ListItem icon={<HomeIcon />} title="Contract response" desc={app.contract?.id ?? app.xrplContract?.id} action={app.contract?.status ?? app.xrplContract?.status} onClick={() => go('l07')} /> : <Card tone="soft"><strong>No contract data</strong><span>BE2 contract response will appear here.</span></Card>}</div><BottomSpace /></Page>
+  return <Page bottomNav><div className="home-head"><span>BlueSafe</span></div><Hero title={c.landlordDashboard} desc={c.landlordDashboardDesc} /><div className="landlord-summary"><div className="income-card"><span>{c.contractStatusTitle}</span><strong>{statusText(app.contract?.status, lang)}</strong><p>{app.contract?.id ?? c.responseNone}</p></div><div className="rent-status-card"><span>{c.settlement}</span><strong>{app.settlements.length}</strong><p>{c.records}</p></div><div className="vacancy-card"><span>XRPL</span><strong>{app.xrplContract ? c.complete : c.waiting}</strong></div><div className="quick-grid"><button onClick={() => go('l07')}>{c.property}</button><button onClick={() => go('l08')}>{c.rent}</button><button onClick={() => go('l11')}>{c.settlement}</button><button onClick={() => go('l10')}>{c.report}</button></div></div><div className="home-tasks landlord-properties"><SectionTitle right={c.all}>{c.contracts}</SectionTitle>{hasContract ? <ListItem icon={<HomeIcon />} title={c.be2ContractResponse} desc={app.contract?.id ?? app.xrplContract?.id} action={statusText(app.contract?.status ?? app.xrplContract?.status, lang)} onClick={() => go('l07')} /> : <Card tone="soft"><strong>{c.noContractData}</strong><span>{c.noContractDataDesc}</span></Card>}</div><BottomSpace /></Page>
 }
-function L07Detail({ app }: NavProps) {
-  return <Page><Hero title="Property detail" desc="Only actual contract response is shown." /><Card tone="soft"><Info label="BE2 contract" value={app.contract?.id ?? 'No response'} mono={Boolean(app.contract?.id)} /><Info label="BE1 escrow" value={app.xrplContract?.id ?? 'No response'} mono={Boolean(app.xrplContract?.id)} /><Info label="Status" value={app.contract?.status ?? app.xrplContract?.status ?? 'No response'} /></Card><SectionTitle>Tenant</SectionTitle><ListItem icon={<UserIcon />} title="Tenant ID" desc={app.tenantId} action={app.tenantAddress ? 'Wallet linked' : 'Waiting'} /></Page>
+
+function L07Detail({ app, lang }: NavProps) {
+  const c = copy[lang]
+  return <Page><Hero title={c.propertyDetail} desc={c.propertyDetailDesc} /><Card tone="soft"><Info label="BE2" value={app.contract?.id ?? c.responseNone} mono={Boolean(app.contract?.id)} /><Info label="BE1" value={app.xrplContract?.id ?? c.responseNone} mono={Boolean(app.xrplContract?.id)} /><Info label={c.status} value={statusText(app.contract?.status ?? app.xrplContract?.status, lang)} /></Card><SectionTitle>{c.tenant}</SectionTitle><ListItem icon={<UserIcon />} title={c.tenantId} desc={app.tenantId} action={app.tenantAddress ? c.walletLinked : c.waiting} /></Page>
 }
-function L08LateRent({ next, app }: NavProps) {
-  return <Page><Hero title="Rent status" desc="Late rent and auto-deduction require actual payment or settlement API response." /><Card tone="soft"><strong>No rent event</strong><span>{app.settlements.length ? 'Settlement response exists.' : 'BE2 settlement or payment response is required.'}</span></Card><BottomCTA label="Confirm" secondary="Contact" onClick={next} /></Page>
+
+function L08LateRent({ next, app, lang }: NavProps) {
+  const c = copy[lang]
+  return <Page><Hero title={c.rentStatus} desc={c.rentStatusDesc} /><Card tone="soft"><strong>{c.noRentEvent}</strong><span>{app.settlements.length ? c.settlementResponse : c.noReturnDataDesc}</span></Card><BottomCTA label={c.confirm} secondary={c.later} onClick={next} /></Page>
 }
-function L10Earnings({ next, app }: NavProps) {
+
+function L10Earnings({ next, app, lang }: NavProps) {
+  const c = copy[lang]
   const total = app.settlements.reduce((sum, item) => sum + (item.amountMinor ?? 0), 0)
-  return <Page bottomNav><Hero title="Earnings report" desc="No fixed YTD revenue. Only settlement totals are shown." /><div className="earnings-summary"><div className="earnings-total"><span>Settlement total</span><strong>{total ? krw(total) : 'No response'}</strong><p>{app.settlements.length} records</p></div><div className="earnings-mini"><span>Contract</span><strong>{app.contract ? '1' : '0'}</strong></div><div className="earnings-mini"><span>XRPL</span><strong>{app.xrplContract ? '1' : '0'}</strong></div></div><SectionTitle>By property</SectionTitle>{app.contract ? <ListItem icon={<HomeIcon />} title="Contract response" desc={app.contract.id} action={app.contract.status} /> : <Card tone="soft"><strong>No earnings data</strong><span>Settlement response will appear here.</span></Card>}<BottomCTA label="View settlement" onClick={next} /></Page>
+  return <Page bottomNav><Hero title={c.earningsReport} desc={c.earningsDesc} /><div className="earnings-summary"><div className="earnings-total"><span>{c.settlementTotal}</span><strong>{total ? krw(total, lang) : c.responseNone}</strong><p>{app.settlements.length} {c.records}</p></div><div className="earnings-mini"><span>{c.contract}</span><strong>{app.contract ? '1' : '0'}</strong></div><div className="earnings-mini"><span>XRPL</span><strong>{app.xrplContract ? '1' : '0'}</strong></div></div><SectionTitle>{c.byProperty}</SectionTitle>{app.contract ? <ListItem icon={<HomeIcon />} title={c.be2ContractResponse} desc={app.contract.id} action={statusText(app.contract.status, lang)} /> : <Card tone="soft"><strong>{c.noEarnings}</strong><span>{c.noEarningsDesc}</span></Card>}<BottomCTA label={c.viewSettlement} onClick={next} /></Page>
 }
-function L11DepositRelease({ next, actions, busy, error, app }: NavProps) {
+
+function L11DepositRelease({ next, actions, busy, error, app, lang }: NavProps) {
+  const c = copy[lang]
   const [open, setOpen] = useState(false)
   const settlement = app.settlements[0]
   const approve = async () => { try { await actions.landlordApproveSettlement(); setOpen(true) } catch { return } }
-  return <Page><Hero title="Deposit settlement" desc="Approval is based only on actual settlement response." /><Card tone="soft"><Info label="Settlement ID" value={settlement?.id ?? 'No response'} mono={Boolean(settlement?.id)} /><Info label="Status" value={settlement?.status ?? 'No response'} /><Info label="Amount" value={settlement?.amountMinor ? krw(settlement.amountMinor) : 'No amount response'} /></Card><BackendInline error={error} /><BottomCTA label={busy ? 'Approving settlement' : 'Approve settlement'} secondary="Reject" onClick={approve} /><ActionModal open={open} title="Settlement approved" onClose={() => setOpen(false)} primaryLabel="Continue" onPrimary={next}><p>BE2 settlement status was updated.</p></ActionModal></Page>
+  return <Page><Hero title={c.depositSettlement} desc={c.depositSettlementDesc} /><Card tone="soft"><Info label={c.settlementId} value={settlement?.id ?? c.responseNone} mono={Boolean(settlement?.id)} /><Info label={c.status} value={statusText(settlement?.status, lang)} /><Info label={c.amount} value={settlement?.amountMinor ? krw(settlement.amountMinor, lang) : c.noAmount} /></Card><BackendInline error={error} /><BottomCTA label={busy ? c.approvingSettlement : c.approveSettlement} secondary={c.reject} onClick={approve} /><ActionModal open={open} title={c.settlementApproved} onClose={() => setOpen(false)} primaryLabel={c.continue} onPrimary={next}><p>{c.agreementSavedDesc}</p></ActionModal></Page>
 }
-function L12Activity({ app }: NavProps) {
-  const rows: string[][] = []
-  const today = formatDate(new Date()).slice(5).replace('-', '.')
-  if (app.contract) rows.push(['Contract', today, 'BE2 contract response', app.contract.id, app.contract.status])
-  if (app.xrplContract) rows.push(['', today, 'BE1 escrow response', app.xrplContract.id, app.xrplContract.status])
-  app.settlements.forEach((item, index) => rows.push([index === 0 ? 'Settlement' : '', today, 'Settlement status', item.id, item.status]))
-  return <Page bottomNav><Hero title="Transaction history" desc="Only contract and settlement responses are shown." /><div className="chip-wrap compact"><span className="chip selected">All</span><span className="chip">Contract</span><span className="chip">Settlement</span></div>{rows.length ? <ActivityRows rows={rows} /> : <Card tone="soft"><strong>No transaction history</strong><span>BE2 contract or settlement response will appear here.</span></Card>}<BottomSpace /></Page>
+
+function L12Activity({ app, lang }: NavProps) {
+  const c = copy[lang]
+  const rows = buildLandlordRows(app, lang)
+  return <Page bottomNav><Hero title={c.transactionHistory} desc={c.transactionHistoryDesc} /><div className="chip-wrap compact"><span className="chip selected">{c.all}</span><span className="chip">{c.contract}</span><span className="chip">{c.settlement}</span></div>{rows.length ? <ActivityRows rows={rows} /> : <Card tone="soft"><strong>{c.noTransactionHistory}</strong><span>{c.noTransactionHistoryDesc}</span></Card>}<BottomSpace /></Page>
 }
-function Page({ children, bottomNav = false }: { children: React.ReactNode; bottomNav?: boolean }) {
+
+function Page({ children, bottomNav = false }: { children: ReactNode; bottomNav?: boolean }) {
   return <section className={bottomNav ? 'page has-bottom-nav' : 'page'}>{children}</section>
 }
 
-function Hero({ title, desc }: { eyebrow?: string; title: string; desc?: string }) {
-  return <div className="hero"><h1>{title}</h1>{desc && <p>{desc}</p>}</div>
+function LangToggle({ lang, onChange }: { lang: Lang; onChange: (lang: Lang) => void }) {
+  return <div className="lang-toggle" aria-label="Language"><button className={lang === 'ko' ? 'active' : ''} onClick={() => onChange('ko')}>KO</button><button className={lang === 'en' ? 'active' : ''} onClick={() => onChange('en')}>EN</button></div>
 }
 
-function TopBar({ onBack }: { title: string; onBack: () => void }) {
-  return <header className="topbar"><button onClick={onBack} aria-label="뒤로"><ChevronLeftIcon /></button><strong aria-hidden="true" /><span /></header>
+function Hero({ title, desc }: { title: string; desc?: string }) {
+  return <div className="hero"><h1>{lines(title)}</h1>{desc && <p>{lines(desc)}</p>}</div>
 }
 
-function StatusBar({ light = false }: { light?: boolean }) {
-  return <div className={light ? 'status light' : 'status'}><span>9:41</span><span>5G 100%</span></div>
+function TopBar({ title, onBack }: { title: string; onBack: () => void }) {
+  return <header className="topbar"><button onClick={onBack} aria-label="back"><ChevronLeftIcon /></button><strong>{title}</strong><span /></header>
 }
 
-function HomeIndicator({ light = false }: { light?: boolean }) {
-  return <div className={light ? 'home-indicator light' : 'home-indicator'}><span /></div>
+function StatusBar() {
+  return <div className="status"><span>9:41</span><span>5G 100%</span></div>
+}
+
+function HomeIndicator() {
+  return <div className="home-indicator"><span /></div>
 }
 
 function BottomCTA({ label, secondary, onClick }: { label: string; secondary?: string; onClick: () => void }) {
   return <div className={secondary ? 'bottom-cta has-secondary' : 'bottom-cta'}>{secondary && <button className="secondary">{secondary}</button>}<button className="primary" onClick={onClick}>{label}</button></div>
 }
 
-function Card({ children, tone = 'white' }: { children: React.ReactNode; tone?: 'white' | 'soft' | 'blue' | 'yellow' }) {
+function Card({ children, tone = 'white' }: { children: ReactNode; tone?: 'white' | 'soft' | 'blue' | 'yellow' }) {
   return <div className={`card ${tone}`}>{children}</div>
 }
 
-function SectionTitle({ children, right }: { children: React.ReactNode; right?: string }) {
+function SectionTitle({ children, right }: { children: ReactNode; right?: string }) {
   return <div className="section-title"><h2>{children}</h2>{right && <span>{right}</span>}</div>
 }
 
-function ListItem({ icon, title, desc, action, onClick }: { icon: React.ReactNode; title: string; desc?: string; action?: string; onClick?: () => void }) {
+function ListItem({ icon, title, desc, action, onClick }: { icon: ReactNode; title: string; desc?: string; action?: string; onClick?: () => void }) {
   return <button className="list-item" onClick={onClick}><span className="list-icon">{icon}</span><span className="list-copy"><strong>{title}</strong>{desc && <small>{desc}</small>}</span>{action && <em>{action}</em>}</button>
 }
 
@@ -764,118 +1120,67 @@ function Checklist({ items }: { items: string[] }) {
   return <>{items.map((item) => <ListItem key={item} icon={<CheckIcon />} title={item} />)}</>
 }
 
-function VaultDiagram() {
-  return (
-    <div className="onboarding-visual vault">
-      <svg className="vault-lines" viewBox="0 0 327 232" preserveAspectRatio="none" aria-hidden="true"><path d="M 68 92 C 68 132, 110 150, 140 158" /><path d="M 259 92 C 259 132, 217 150, 187 158" /></svg>
-      <div className="party-card tenant"><UserIcon /><span>임차인</span></div>
-      <div className="party-card landlord"><KeyIcon /><span>임대인</span></div>
-      <div className="vault-core"><LockIcon /><strong>VAULT</strong><small>XRPL Escrow</small></div>
-    </div>
-  )
+function VaultDiagram({ lang }: { lang: Lang }) {
+  const c = copy[lang]
+  return <div className="onboarding-visual vault"><svg className="vault-lines" viewBox="0 0 327 232" preserveAspectRatio="none" aria-hidden="true"><path d="M 68 92 C 68 132, 110 150, 140 158" /><path d="M 259 92 C 259 132, 217 150, 187 158" /></svg><div className="party-card tenant"><UserIcon /><span>{c.tenant}</span></div><div className="party-card landlord"><KeyIcon /><span>{c.landlord}</span></div><div className="vault-core"><LockIcon /><strong>VAULT</strong><small>XRPL Escrow</small></div></div>
 }
 
-function ExamplePanel({ kind }: { kind: 'return' | 'bills' | 'proof' }) {
-  if (kind === 'return') return <div className="example-panel"><div className="example-calendar"><span>Auto return</span><strong>Waiting</strong><small>Calculated after contract dates exist</small></div><div className="example-chip">D-</div></div>
-  if (kind === 'bills') return <div className="example-panel list-preview"><div><CheckIcon /><span>Electric</span><b>Waiting</b></div><div><ReceiptIcon /><span>Gas</span><b>Disabled</b></div><div><CheckIcon /><span>Water</span><b>Waiting</b></div></div>
-  return <div className="example-panel proof-preview"><div><span>XRPL TX</span><strong>Waiting</strong><small>Shown after BE1 response</small></div><ShieldIcon /></div>
+function ExamplePanel({ kind, lang }: { kind: 'return' | 'bills' | 'proof'; lang: Lang }) {
+  const c = copy[lang]
+  if (kind === 'return') return <div className="example-panel"><div className="example-calendar"><span>{c.autoReturn}</span><strong>{c.waiting}</strong><small>{c.countdownDesc}</small></div><div className="example-chip">D-</div></div>
+  if (kind === 'bills') return <div className="example-panel list-preview"><div><CheckIcon /><span>{c.utilityTitle}</span><b>{c.utilityDisabled}</b></div><div><ReceiptIcon /><span>{c.contract}</span><b>{c.ready}</b></div><div><CheckIcon /><span>{c.settlement}</span><b>{c.waiting}</b></div></div>
+  return <div className="example-panel proof-preview"><div><span>{c.tx}</span><strong>{c.waiting}</strong><small>{c.receiptDesc}</small></div><ShieldIcon /></div>
 }
+
 function Dots({ active, count }: { active: number; count: number }) {
   return <div className="dots">{Array.from({ length: count }, (_, i) => <button key={i} className={i === active ? 'active' : ''} />)}</div>
 }
 
 function StepperHeader({ current }: { current: number }) {
-  return (
-    <div className="stepper-head">
-      {[0, 1, 2].map((n) => (
-        <span key={n} className={n <= current ? 'active' : ''}>
-          {n + 1}
-        </span>
-      ))}
-    </div>
-  )
+  return <div className="stepper-head">{[0, 1, 2].map((n) => <span key={n} className={n <= current ? 'active' : ''}>{n + 1}</span>)}</div>
 }
 
 function Timeline({ items }: { items: string[] }) {
-  return <Card tone="soft">{items.map((raw, i) => { const [title, desc] = raw.split('|'); return <div className="step-row" key={title}><span className={i < 2 ? 'done' : ''}>{i < 2 ? <CheckIcon /> : i + 1}</span><div><strong>{title}</strong><small>{desc}</small></div></div> })}</Card>
+  return <Card tone="soft">{items.map((raw, i) => { const [title, desc] = raw.split('|'); return <div className="step-row" key={`${title}-${i}`}><span className={i < 2 ? 'done' : ''}>{i < 2 ? <CheckIcon /> : i + 1}</span><div><strong>{title}</strong><small>{desc}</small></div></div> })}</Card>
 }
 
 function ActivityRows({ rows }: { rows: string[][] }) {
   return <>{rows.map(([section, date, title, desc, value], i) => <div key={`${date}-${title}-${i}`}>{section && <SectionTitle>{section}</SectionTitle>}<div className="activity-row"><span>{date}</span><div><strong>{title}</strong><small>{desc}</small></div><b>{value}</b></div></div>)}</>
 }
 
-function BackendStatus({ app, error }: { app: AppModel; error: string }) {
-  const status = app.xrplContract?.status ?? app.contract?.status ?? '백엔드 응답 대기'
-  const contractLabel = app.contract?.id ? `BE2 ${app.contract.id}` : 'BE2 응답 없음'
-  const xrplLabel = app.xrplContract?.id ? `BE1 ${app.xrplContract.id}` : 'BE1 응답 없음'
-
-  return (
-    <div className="backend-status">
-      <div>
-        <span>연동 상태</span>
-        <strong>{status}</strong>
-      </div>
-      <p>{contractLabel} · {xrplLabel}</p>
-      {error && <em>{error}</em>}
-    </div>
-  )
+function BackendStatus({ app, error, lang }: { app: AppModel; error: string; lang: Lang }) {
+  const c = copy[lang]
+  const status = statusText(app.xrplContract?.status ?? app.contract?.status, lang)
+  const contractLabel = app.contract?.id ? `BE2 ${app.contract.id}` : `BE2 ${c.responseNone}`
+  const xrplLabel = app.xrplContract?.id ? `BE1 ${app.xrplContract.id}` : `BE1 ${c.responseNone}`
+  return <div className="backend-status"><div><span>{c.backendStatus}</span><strong>{status}</strong></div><p>{contractLabel} · {xrplLabel}</p>{error && <em>{error}</em>}</div>
 }
 
 function BackendInline({ label, error }: { label?: string; error?: string }) {
-  if (!label && !error) {
-    return null
-  }
-
-  return (
-    <div className={error ? 'backend-inline error' : 'backend-inline'}>
-      {label && <span>{label}</span>}
-      {error && <span>{error}</span>}
-    </div>
-  )
+  if (!label && !error) return null
+  return <div className={error ? 'backend-inline error' : 'backend-inline'}>{label && <span>{label}</span>}{error && <span>{error}</span>}</div>
 }
 
-function ActionModal({
-  open,
-  title,
-  children,
-  primaryLabel,
-  onPrimary,
-  onClose,
-}: {
-  open: boolean
-  title: string
-  children: React.ReactNode
-  primaryLabel: string
-  onPrimary: () => void
-  onClose: () => void
-}) {
+function ActionModal({ open, title, children, primaryLabel, onPrimary, onClose }: { open: boolean; title: string; children: ReactNode; primaryLabel: string; onPrimary: () => void; onClose: () => void }) {
   if (!open) return null
-
-  return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={title}>
-      <div className="modal-sheet">
-        <button className="modal-close" onClick={onClose} aria-label="닫기">×</button>
-        <h2>{title}</h2>
-        <div className="modal-body">{children}</div>
-        <button className="modal-primary" onClick={onPrimary}>{primaryLabel}</button>
-      </div>
-    </div>
-  )
+  return <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={title}><div className="modal-sheet"><button className="modal-close" onClick={onClose} aria-label="close">×</button><h2>{title}</h2><div className="modal-body">{children}</div><button className="modal-primary" onClick={onPrimary}>{primaryLabel}</button></div></div>
 }
 
-function TenantNav({ active, go }: { active: ScreenId; go: (id: ScreenId) => void }) {
-  return <nav className="bottom-nav four-tabs">{[['t09', '홈', <HomeIcon />], ['t20', '내역', <HistoryIcon />], ['t06', '계약', <ReceiptIcon />], ['t12', '내정보', <UserIcon />]].map(([id, label, icon]) => <button key={id as string} className={active === id ? 'active' : ''} onClick={() => go(id as ScreenId)}>{icon}<span>{label as string}</span></button>)}</nav>
+function TenantNav({ active, go, lang }: { active: ScreenId; go: (id: ScreenId) => void; lang: Lang }) {
+  const c = copy[lang]
+  return <nav className="bottom-nav four-tabs">{[['t09', c.home, <HomeIcon />], ['t20', c.history, <HistoryIcon />], ['t06', c.contract, <ReceiptIcon />], ['t12', c.profile, <UserIcon />]].map(([id, label, icon]) => <button key={id as string} className={active === id ? 'active' : ''} onClick={() => go(id as ScreenId)}>{icon}<span>{label as string}</span></button>)}</nav>
 }
 
-function LandlordNav({ active, go }: { active: ScreenId; go: (id: ScreenId) => void }) {
-  return <nav className="bottom-nav four-tabs">{[['l06', '홈', <HomeIcon />], ['l10', '수익', <ChartIcon />], ['l12', '계약', <ReceiptIcon />], ['l02', '내정보', <UserIcon />]].map(([id, label, icon]) => <button key={id as string} className={active === id ? 'active' : ''} onClick={() => go(id as ScreenId)}>{icon}<span>{label as string}</span></button>)}</nav>
+function LandlordNav({ active, go, lang }: { active: ScreenId; go: (id: ScreenId) => void; lang: Lang }) {
+  const c = copy[lang]
+  return <nav className="bottom-nav four-tabs">{[['l06', c.home, <HomeIcon />], ['l10', c.revenue, <ChartIcon />], ['l12', c.contract, <ReceiptIcon />], ['l02', c.profile, <UserIcon />]].map(([id, label, icon]) => <button key={id as string} className={active === id ? 'active' : ''} onClick={() => go(id as ScreenId)}>{icon}<span>{label as string}</span></button>)}</nav>
 }
 
 function TimeBox({ value, label }: { value: string; label: string }) {
   return <div><strong>{value}</strong><span>{label}</span></div>
 }
 
-function IconBox({ children }: { children: React.ReactNode }) {
+function IconBox({ children }: { children: ReactNode }) {
   return <span className="icon-box">{children}</span>
 }
 
@@ -883,13 +1188,81 @@ function BottomSpace() {
   return <div className="bottom-space" />
 }
 
-function krw(value: number) {
-  return `₩${value.toLocaleString('ko-KR')}`
+function lines(value: string) {
+  return value.split('\n').map((line, index) => <span key={`${line}-${index}`}>{line}{index < value.split('\n').length - 1 && <br />}</span>)
+}
+
+function krw(value: number | string, lang: Lang) {
+  const numberValue = typeof value === 'number' ? value : Number(value)
+  if (Number.isFinite(numberValue)) return `${numberValue.toLocaleString(lang === 'ko' ? 'ko-KR' : 'en-US')}원`
+  return String(value)
 }
 
 function shortHash(value: string) {
   if (value.length <= 12) return value
   return `${value.slice(0, 6)}…${value.slice(-4)}`
+}
+
+function statusText(status: ContractStatus | SettlementRecord['status'] | string | undefined, lang: Lang) {
+  const c = copy[lang]
+  if (!status) return c.responseNone
+  const map: Record<string, Record<Lang, string>> = {
+    draft: { ko: '계약 작성 중', en: 'Draft' },
+    escrow_pending: { ko: '에스크로 대기', en: 'Escrow pending' },
+    escrow_validated: { ko: '에스크로 확인 완료', en: 'Escrow validated' },
+    active: { ko: '계약 진행 중', en: 'Active' },
+    closed: { ko: '종료됨', en: 'Closed' },
+    cancelled: { ko: '취소됨', en: 'Cancelled' },
+    collecting: { ko: '정산 수집 중', en: 'Collecting' },
+    accrued: { ko: '정산 발생', en: 'Accrued' },
+    confirmed: { ko: '정산 확정', en: 'Confirmed' },
+    archived: { ko: '보관됨', en: 'Archived' },
+  }
+  return map[status]?.[lang] ?? status
+}
+
+function dateRange(start?: string, end?: string, lang: Lang = 'ko') {
+  const c = copy[lang]
+  const startsAt = parseDate(start)
+  const endsAt = parseDate(end)
+  if (!startsAt || !endsAt) return c.responseNone
+  return `${formatDate(startsAt)}–${formatDate(endsAt)}`
+}
+
+function localizeError(message: string, lang: Lang) {
+  if (lang === 'en') return message || 'Request failed'
+  if (!message) return '요청 처리에 실패했어요'
+  if (message.includes('Failed to fetch')) return '서버에 연결하지 못했어요'
+  if (message.includes('URL is not configured')) return '백엔드 주소가 설정되지 않았어요'
+  if (message.includes('wallet addresses are required')) return '임차인과 임대인 지갑 주소가 모두 필요해요'
+  if (message.includes('depositAmount') || message.includes('stakeAmount')) return '계약의 보증금 또는 락업 수량 응답이 필요해요'
+  if (message.includes('startsAt') || message.includes('endsAt')) return '계약 시작일과 종료일 응답이 필요해요'
+  if (message.includes('transaction hash')) return '에스크로 트랜잭션 해시 응답이 필요해요'
+  if (message.includes('settlement exists')) return '백엔드 정산 응답이 아직 없어요'
+  return message
+}
+
+function buildTenantRows(app: AppModel, lang: Lang) {
+  const c = copy[lang]
+  const rows: string[][] = []
+  const today = formatDate(new Date()).slice(5).replace('-', '.')
+  if (app.tenantAddress) rows.push([c.walletCreated, today, c.tenantWalletCreated, shortHash(app.tenantAddress), 'XRPL'])
+  if (app.landlordAddress) rows.push(['', today, c.landlordWalletCreated, shortHash(app.landlordAddress), 'XRPL'])
+  if (app.contract) rows.push(['', today, c.be2ContractResponse, app.contract.id, statusText(app.contract.status, lang)])
+  if (app.xrplContract) rows.push(['', today, c.be1EscrowResponse, app.xrplContract.id, statusText(app.xrplContract.status, lang)])
+  if (app.xrplContract?.depositEscrowTxHash) rows.push(['', today, c.xrplTxCreated, shortHash(app.xrplContract.depositEscrowTxHash), 'XRPL'])
+  app.settlements.forEach((settlement, index) => rows.push([index === 0 ? c.settlementResponse : '', today, c.settlementStatus, settlement.id, statusText(settlement.status, lang)]))
+  return rows
+}
+
+function buildLandlordRows(app: AppModel, lang: Lang) {
+  const c = copy[lang]
+  const rows: string[][] = []
+  const today = formatDate(new Date()).slice(5).replace('-', '.')
+  if (app.contract) rows.push([c.contract, today, c.be2ContractResponse, app.contract.id, statusText(app.contract.status, lang)])
+  if (app.xrplContract) rows.push(['', today, c.be1EscrowResponse, app.xrplContract.id, statusText(app.xrplContract.status, lang)])
+  app.settlements.forEach((item, index) => rows.push([index === 0 ? c.settlement : '', today, c.settlementStatus, item.id, statusText(item.status, lang)]))
+  return rows
 }
 
 function getLeaseMetrics(app: AppModel) {
