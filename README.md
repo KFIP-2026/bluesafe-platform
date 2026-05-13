@@ -1,40 +1,119 @@
 # BlueSafe Platform
 
-BlueSafe XRPL 해커톤 통합 레포입니다. 기존 팀원 레포는 그대로 보존하고, 발표 및 통합 실행을 위해 프론트엔드, BE1, BE2, XRPL core를 한 곳에 모았습니다.
+BlueSafe is an XRPL-based rental deposit and utility settlement platform for foreign tenants and landlords in Korea.
 
-## Structure
+The service moves rental trust workflows into transparent on-chain execution: tenant and landlord wallets are connected, rental deposits are locked through XRPL escrow, rent and settlement transactions are recorded, and verified rental history can be issued as a reputation SBT.
+
+## Project Summary
+
+BlueSafe protects foreign tenants in Korea from rental deposit non-return, opaque utility billing, and limited access to local dispute remedies. The platform combines a mobile-first rental workflow with XRPL infrastructure for escrow, fast settlement, low transaction fees, payment metadata, and reputation records.
+
+The initial product targets foreign tenants, co-living operators, real estate agencies, and landlords in high-density foreign residential areas. It can expand into a B2B SaaS product for rental operators that need deposit escrow, automated settlement, transparent rental records, and post-settlement cross-border remittance.
+
+## Project Description
+
+Many foreign tenants in Korea face structural risks during rental contracts: delayed deposit returns, unclear utility charges, language barriers, and weak practical access to legal remedies after leaving the country. BlueSafe addresses these problems by turning private rental promises into transparent, automated, and verifiable workflows.
+
+BlueSafe locks rental deposits using XRPL escrow and a 2-of-3 trust model involving the tenant, landlord, and BlueSafe. This prevents any single party from unilaterally misusing the deposit while still allowing fair release when contract conditions are met. When the lease ends, the product supports automatic return flows based on predefined contract conditions.
+
+The platform also improves utility and rent settlement transparency by connecting operational records to XRPL transactions. Rental actions such as deposit lockup, rent payment, escrow finish, remittance, and reputation issuance are surfaced in the mobile frontend so users can understand both the financial state and the on-chain evidence.
+
+XRPL was selected because it provides native escrow primitives, native multisignature support, low fees, fast finality, and mature infrastructure for compliant financial applications. These properties make XRPL well-suited for recurring rental workflows, small settlement payments, and cross-border financial use cases.
+
+## Demo
+
+- Prototype: [mobile-frontend-liart.vercel.app](https://mobile-frontend-liart.vercel.app/)
+- Demo mode: [tenant demo flow](https://mobile-frontend-liart.vercel.app/?demo=1&tx=mock&lang=ko&role=tenant&demoSession=ctr_demo_8KQ91DLM2)
+- Demo video: [YouTube Shorts](https://www.youtube.com/shorts/KIQSk51GBj0)
+- Repository: [KFIP-2026/bluesafe-platform](https://github.com/KFIP-2026/bluesafe-platform)
+
+## Flow Preview
+
+### 1. Start to Contract
+
+![Start to contract](docs/flow-captures/flow-01-start-contract.png)
+
+### 2. Deposit Lockup and Tenant Home
+
+![Deposit lockup and tenant home](docs/flow-captures/flow-02-deposit-living.png)
+
+### 3. Actions and Landlord Sync
+
+![Actions and landlord sync](docs/flow-captures/flow-03-actions-landlord.png)
+
+## Core Features
+
+- Tenant and landlord role-based mobile flow
+- Internal XRPL wallet connection for demo users
+- Rental contract draft and signing flow
+- XRPL escrow deposit lockup
+- On-chain receipt and explorer link surface
+- Tenant home dashboard with deposit status, contract period, and activity state
+- Rent payment between tenant and landlord wallets
+- Automatic deposit return flow
+- Reputation SBT issuance flow
+- Post-settlement remittance flow with recipient XRPL address and amount input
+- Landlord dashboard with contract state, settlement state, and XRPL status
+- BE1/BE2 synchronized demo session state for filming and presentations
+
+## XRPL Usage
+
+BlueSafe uses XRPL for:
+
+- Escrow-style deposit lockup and release flows
+- Testnet wallet creation and account-to-account payments
+- Rent payment transaction submission
+- Escrow finish / automatic return demo action
+- Reputation SBT / NFT-style transaction surface
+- Remittance transaction surface
+- Explorer links for transaction verification
+
+Testnet accounts used in the demo:
+
+| Role | XRPL Testnet Address | Explorer |
+| --- | --- | --- |
+| Tenant | `rEXbaMe5As96SQA5pvLhhrKxFPcBvoHnVR` | [View account](https://testnet.xrpl.org/accounts/rEXbaMe5As96SQA5pvLhhrKxFPcBvoHnVR) |
+| Landlord | `r3YwvjvUsfJJakY648SeudzrEdRpGEd1Ex` | [View account](https://testnet.xrpl.org/accounts/r3YwvjvUsfJJakY648SeudzrEdRpGEd1Ex) |
+
+## Monorepo Structure
 
 ```txt
 apps/
-  mobile-frontend/     Toss-like mobile frontend
+  mobile-frontend/     Toss-like mobile frontend for tenant and landlord flows
+
 services/
-  be1-xrpl/            NestJS XRPL contract, escrow, balance, internal wallet API
-  be2-ops/             Express operations API: contracts, evidence, disputes, settlements
+  be1-xrpl/            NestJS XRPL service: wallet, escrow, contract, demo chain actions
+  be2-ops/             Express operations API: contracts, evidence, settlement, XRPL tracking
+
 packages/
-  xrpl-core/           XRPL service/core package
+  xrpl-core/           Shared XRPL service/core package
+
 docs/
-  flow-captures/       Current mobile UI screenshots and flow board
+  flow-captures/       UI screenshots and flow boards
 ```
 
-## Integrated Changes
+## Architecture
 
-- BE1에 내부 XRPL 지갑 API를 통합했습니다.
-  - `POST /api/wallet/connect`
-  - `POST /api/wallet/disconnect`
-  - `xrpl.Wallet.generate()` 기반 주소 생성
-- 프론트는 역할 선택 후 지갑 연결 화면을 거쳐 임차인/임대인 플로우로 진입합니다.
-- BE1과 BE2는 `http://localhost:5179`, `http://127.0.0.1:5179` CORS를 기본 허용합니다.
-- 별도 wallet API 서버는 두지 않습니다. 지갑 연결은 BE1의 `/api/wallet/connect`로 처리합니다.
+```mermaid
+flowchart LR
+  User["Tenant / Landlord"] --> Frontend["Mobile Frontend"]
+  Frontend --> BE1["BE1 XRPL Service"]
+  Frontend --> BE2["BE2 Operations API"]
+  BE1 --> XRPL["XRPL Testnet"]
+  BE2 --> Ops["Contracts / Evidence / Settlement State"]
+  BE2 --> XRPLTrack["XRPL Tracking"]
+  XRPLTrack --> XRPL
+```
 
 ## Local Run
 
-루트에서 한 번 설치합니다.
+Install dependencies from the repository root:
 
 ```bash
 npm install
 ```
 
-BE1은 Postgres와 Redis가 필요합니다.
+Start BE1 dependencies if full BE1 contract creation is needed:
 
 ```bash
 cd services/be1-xrpl
@@ -42,7 +121,7 @@ docker compose up -d
 cd ../..
 ```
 
-각 서버를 별도 터미널에서 실행합니다.
+Run each service in a separate terminal:
 
 ```bash
 # BE1 XRPL + internal wallet API: http://localhost:3000
@@ -55,60 +134,82 @@ npm run dev:be2
 npm run dev:frontend
 ```
 
-Docker Desktop 없이 내부지갑 생성만 먼저 확인하려면 BE1 대신 wallet-only 모드를 실행할 수 있습니다.
+For wallet-only local UI testing without Postgres/Redis:
 
 ```bash
 npm run dev:be1:wallet
 ```
 
-이 모드는 `POST /api/wallet/connect`만 띄우며, 실제 XRPL 주소는 BE1의 `xrpl.Wallet.generate()`로 생성합니다. `POST /contracts` 기반 에스크로 생성은 전체 BE1 모드와 Postgres/Redis가 필요합니다.
-
-브라우저 접속:
+Open:
 
 ```txt
 http://localhost:5179
 ```
 
+Useful demo URL:
+
+```txt
+http://localhost:5179/?demo=1&tx=mock&lang=ko&role=tenant&demoSession=ctr_demo_8KQ91DLM2
+```
+
 ## Environment
 
-프론트 기본 연결값:
+Root `.env.example` contains the local defaults:
 
 ```env
 VITE_BE1_URL=http://localhost:3000
 VITE_BE2_URL=http://localhost:3100
 VITE_WALLET_API_URL=http://localhost:3000
 VITE_BLUESAFE_AUTH_TOKEN=
+
+XRPL_NETWORK_URL=wss://s.altnet.rippletest.net:51233
+XRPL_EXPLORER_URL=https://testnet.xrpl.org
+XRPL_FAUCET_URL=https://faucet.altnet.rippletest.net/accounts
+XRPL_OPERATOR_SEED=
+
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/bluesafe_dev
+REDIS_HOST=localhost
+REDIS_PORT=6379
+
+IPFS_MODE=mock
+BLUESAFE_AUTH=0
+XRPL_WSS_URL=
 ```
 
-BE1에서 실제 XRPL 에스크로 생성까지 테스트하려면 `XRPL_OPERATOR_SEED`가 필요합니다. 값이 없으면 지갑 연결과 UI 흐름은 확인할 수 있지만, `POST /contracts` 기반 실제 락업은 실패합니다.
+`XRPL_OPERATOR_SEED` is required for real XRPL escrow creation through BE1 contract APIs. Demo filming can use mock transaction mode with `tx=mock`, while local real transaction tests can run against XRPL Testnet when funded wallets and backend services are available.
 
-BE2는 기본 개발 모드에서 `IPFS_MODE=mock`, `BLUESAFE_AUTH=0`로 실행하는 것을 권장합니다.
+## Main API Surface
 
-## Main API Contracts
-
-BE1:
+BE1 XRPL service:
 
 - `POST /api/wallet/connect`
 - `POST /api/wallet/disconnect`
+- `GET /api/wallet/demo-session/:sessionId`
+- `POST /api/wallet/demo-session/:sessionId`
+- `POST /api/wallet/demo-chain-action`
 - `POST /contracts`
 - `GET /contracts/:id`
 - `GET /contracts/:id/balance`
 
-BE2:
+BE2 operations API:
 
 - `POST /v1/contracts`
-  - tenant/landlord id와 계약 금액/기간을 저장
 - `PATCH /v1/contracts/:contractId/status`
 - `PATCH /v1/contracts/:contractId/escrow-anchor`
 - `POST /v1/evidences`
-- `POST /v1/disputes`
-- `POST /v1/disputes/:disputeId/decision`
 - `GET /v1/settlements`
 - `PATCH /v1/settlements/:settlementId/status`
 - `POST /v1/xrpl/track`
 
-## Notes
+## Build
 
-- 원본 팀원 레포는 수정하지 않았고, 이 레포만 통합 실행용으로 수정합니다.
-- BE1 내부지갑은 현재 메모리 기반입니다. 서버 재시작 시 세션이 초기화되며, 운영용으로는 사용자/세션 단위 저장소가 필요합니다.
-- `docs/flow-captures/bluesafe-flow-board.png`에서 현재 모바일 화면 흐름을 볼 수 있습니다.
+```bash
+npm run build:frontend
+npm run build:be1
+npm run build:be2
+npm run build:xrpl-core
+```
+
+## Current Stage
+
+BlueSafe is currently at MVP development stage. The repository contains an integrated frontend, BE1 XRPL service, BE2 operations API, shared XRPL package, demo state synchronization, and mobile flow assets for the Korea Financial Innovation Program 2026 submission.
