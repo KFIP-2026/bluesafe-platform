@@ -112,6 +112,60 @@ svg {
   stroke-linejoin: round;
 }
 
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.setting-row strong,
+.setting-row span {
+  display: block;
+}
+
+.setting-row strong {
+  color: var(--grey900);
+  font-size: 16px;
+  line-height: 23px;
+  font-weight: 750;
+}
+
+.setting-row span {
+  margin-top: 2px;
+  color: var(--grey500);
+  font-size: 13px;
+  line-height: 19px;
+  font-weight: 650;
+}
+
+.language-segment {
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: 3px;
+  padding: 4px;
+  border-radius: 999px;
+  background: #e9eef7;
+}
+
+.language-segment button {
+  min-width: 40px;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--grey500);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.language-segment button.active {
+  background: #fff;
+  color: var(--brand);
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
+}
+
 .entry {
   position: absolute;
   inset: 0;
@@ -1375,6 +1429,66 @@ svg {
   color: #191f28;
 }
 
+.form-head {
+  margin-bottom: 14px;
+}
+
+.form-head strong,
+.form-head span {
+  display: block;
+}
+
+.form-head strong {
+  font-size: 17px;
+  line-height: 24px;
+}
+
+.form-head span {
+  margin-top: 4px;
+  color: #6b7684;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.flow-field {
+  display: grid;
+  gap: 8px;
+  padding: 12px 0;
+  border-top: 1px solid #eef0f2;
+}
+
+.flow-field span {
+  color: #6b7684;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 700;
+}
+
+.flow-field input {
+  width: 100%;
+  min-width: 0;
+  height: 46px;
+  border: 0;
+  border-radius: 12px;
+  padding: 0 14px;
+  background: #fff;
+  color: #191f28;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  outline: none;
+}
+
+.flow-field input:focus {
+  box-shadow: inset 0 0 0 1.5px var(--brand);
+}
+
+.date-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .mono {
   font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
 }
@@ -1684,6 +1798,13 @@ svg {
   padding: 0 18px;
   color: #4e5968;
   background: #f2f4f6;
+}
+
+.bottom-cta .primary:disabled {
+  color: #8b95a1;
+  background: #e5e8eb;
+  box-shadow: none;
+  cursor: not-allowed;
 }
 
 .bottom-nav {
@@ -2326,7 +2447,7 @@ svg {
   border-radius: 999px;
   background:
     radial-gradient(circle at center, #fff 57%, transparent 58%),
-    conic-gradient(var(--home-blue) 0 var(--progress, 23%), #eef0f2 var(--progress, 23%) 100%);
+    conic-gradient(var(--home-blue) 0 var(--progress, 0%), #eef0f2 var(--progress, 0%) 100%);
 }
 
 .progress-ring strong {
@@ -2626,7 +2747,7 @@ svg {
   border-radius: 999px;
   background:
     radial-gradient(circle at center, #fff 58%, transparent 59%),
-    conic-gradient(var(--brand) 0 62%, #eef0f2 62% 100%);
+    conic-gradient(var(--brand) 0 var(--progress, 0%), #eef0f2 var(--progress, 0%) 100%);
 }
 
 .count-ring strong,

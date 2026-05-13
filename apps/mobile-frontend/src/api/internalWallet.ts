@@ -61,7 +61,7 @@ function normalizeWallet(data: WalletConnectResponse): InternalWalletSession {
 
   return {
     account,
-    network: typeof data.network === 'string' ? data.network : data.network?.label || data.network?.id || 'testnet',
+    network: typeof data.network === 'string' ? data.network : data.network?.label || data.network?.id || '',
     provider: 'BlueSafe Wallet',
   }
 }

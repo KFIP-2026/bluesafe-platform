@@ -37,6 +37,10 @@ export interface Contract {
   landlordId: string;
   status: ContractStatus;
   escrowCreateTxHash?: string;
+  depositAmount?: string;
+  stakeAmount?: string;
+  startsAt?: string;
+  endsAt?: string;
   createdAt: string;
   updatedAt: string;
 }

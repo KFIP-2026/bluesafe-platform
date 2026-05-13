@@ -47,6 +47,10 @@ function rowToContract(r: Record<string, unknown>): Contract {
     landlordId: String(r.landlord_id),
     status: r.status as Contract["status"],
     escrowCreateTxHash: r.escrow_create_tx_hash ? String(r.escrow_create_tx_hash) : undefined,
+    depositAmount: r.deposit_amount ? String(r.deposit_amount) : undefined,
+    stakeAmount: r.stake_amount ? String(r.stake_amount) : undefined,
+    startsAt: r.starts_at ? toIso(r.starts_at as Date) : undefined,
+    endsAt: r.ends_at ? toIso(r.ends_at as Date) : undefined,
     createdAt: toIso(r.created_at as Date),
     updatedAt: toIso(r.updated_at as Date),
   };
@@ -294,13 +298,17 @@ export class PostgresRepository implements AppRepository {
 
   async saveContract(c: Contract): Promise<void> {
     await this.pool.query(
-      `INSERT INTO contracts (id, tenant_id, landlord_id, status, escrow_create_tx_hash, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)
+      `INSERT INTO contracts (id, tenant_id, landlord_id, status, escrow_create_tx_hash, deposit_amount, stake_amount, starts_at, ends_at, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
        ON CONFLICT (id) DO UPDATE SET
          tenant_id = EXCLUDED.tenant_id,
          landlord_id = EXCLUDED.landlord_id,
          status = EXCLUDED.status,
          escrow_create_tx_hash = EXCLUDED.escrow_create_tx_hash,
+         deposit_amount = EXCLUDED.deposit_amount,
+         stake_amount = EXCLUDED.stake_amount,
+         starts_at = EXCLUDED.starts_at,
+         ends_at = EXCLUDED.ends_at,
          updated_at = EXCLUDED.updated_at`,
       [
         c.id,
@@ -308,6 +316,10 @@ export class PostgresRepository implements AppRepository {
         c.landlordId,
         c.status,
         c.escrowCreateTxHash ?? null,
+        c.depositAmount ?? null,
+        c.stakeAmount ?? null,
+        c.startsAt ?? null,
+        c.endsAt ?? null,
         c.createdAt,
         c.updatedAt,
       ],
