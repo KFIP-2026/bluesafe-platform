@@ -1,13 +1,14 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import './App.css'
-import { backendConfig, bluesafeApi, type BackendContract, type ContractStatus, type SettlementRecord } from './api/bluesafe'
+import { backendConfig, bluesafeApi, type BackendContract, type ChainTxReceipt, type ContractStatus, type SettlementRecord } from './api/bluesafe'
 import { connectInternalWallet } from './api/internalWallet'
 import reputationMascot from './assets/reputation-mascot.png'
+import { demoAddresses, demoContractTerms, demoIds, demoIso, enableDemoModeFromUrl, getDemoNow, getDemoSessionId, isDemoMode, isRealDemoTxMode } from './demoMode'
 
 type ScreenId =
   | 't01' | 'role' | 'wallet' | 't02' | 't03' | 't04' | 't05' | 't06' | 't07' | 't08' | 't09' | 't10'
-  | 't11' | 't12' | 't13' | 't17' | 't18' | 't19' | 't20'
-  | 'l01' | 'l02' | 'l03' | 'l04' | 'l05' | 'l06' | 'l07' | 'l08' | 'l10' | 'l11' | 'l12'
+  | 't11' | 't12' | 't13' | 't14' | 't17' | 't18' | 't19' | 't20'
+  | 'l01' | 'l02' | 'l03' | 'l04' | 'l05' | 'l06' | 'l07' | 'l08' | 'l10' | 'l11' | 'l12' | 'l13'
 
 type Lang = 'ko' | 'en'
 type UserRole = 'tenant' | 'landlord'
@@ -41,18 +42,30 @@ type AppModel = {
   landlordId: string
   tenantAddress: string
   landlordAddress: string
+  remittanceAddress: string
+  remittanceAmountXrp: string
   contractDraft: ContractDraft
   contract?: BackendContract
   xrplContract?: BackendContract
   settlements: SettlementRecord[]
+  chainActions: Partial<Record<ChainActionKey, ChainTxReceipt>>
   backendEvents: string[]
 }
+
+type ChainActionKey = 'rentPayment' | 'autoReturn' | 'sbt' | 'remittance'
 
 type ContractDraft = {
   depositAmount: string
   stakeAmount: string
   startsAt: string
   endsAt: string
+}
+
+type DemoContractPayload = {
+  depositAmount?: string
+  stakeAmount?: string
+  startsAt?: string
+  endsAt?: string
 }
 
 type AppActions = {
@@ -65,6 +78,12 @@ type AppActions = {
   loadSettlements: () => Promise<void>
   landlordSignContract: () => Promise<void>
   landlordApproveSettlement: () => Promise<void>
+  runRentPayment: () => Promise<ChainTxReceipt>
+  finishEscrow: () => Promise<ChainTxReceipt>
+  mintSbt: () => Promise<ChainTxReceipt>
+  updateRemittanceAddress: (address: string) => void
+  updateRemittanceAmount: (amountXrp: string) => void
+  runRemittance: (destinationAddress: string, amountXrp: string) => Promise<ChainTxReceipt>
 }
 
 type TimelineItem = {
@@ -180,9 +199,11 @@ const ko = {
   stake: '락업 수량',
   contractTerms: '계약 조건',
   contractTermsDesc: 'BE1 에스크로에 보낼 실제 조건을 입력해요.',
+  estimatedLockup: '예상 가치',
+  autoCalculated: '보증금을 XRPL 기준 가치로 환산해 보여줘요',
   startDate: '시작일',
   endDate: '종료일',
-  missingContractTerms: '보증금, 락업 수량, 계약 기간을 입력해야 해요',
+  missingContractTerms: '보증금과 계약 기간을 입력해야 해요',
   connectLandlordWallet: '임대인 지갑 연결',
   connectTenantWallet: '임차인 지갑 연결',
   counterpartyWallet: '상대방 지갑',
@@ -190,6 +211,41 @@ const ko = {
   counterpartyNeeded: '상대방 지갑 연결이 필요해요',
   flowReady: '다음 단계 준비 완료',
   tx: 'XRPL TX',
+  txKind: 'TX 종류',
+  network: '네트워크',
+  realTxMode: '실제 XRPL Testnet TX',
+  realTxModeDesc: '버튼을 누르면 테스트넷에 EscrowCreate가 제출돼요. 보통 10~30초 걸려요.',
+  mockTxMode: '영상용 TX 목업 모드',
+  mockTxModeDesc: '현재 URL에 tx=mock이 있어 체인 제출 없이 흐름만 보여줘요.',
+  realTxDone: '실제 테스트넷 반영 완료',
+  realTxDoneDesc: '검증된 트랜잭션을 XRPL 익스플로러에서 확인할 수 있어요.',
+  txNotSubmitted: '제출 안함',
+  featureCheck: '체인 기능 체크',
+  escrowFeature: '에스크로',
+  escrowFeatureDesc: 'BE1 EscrowCreate 제출 경로',
+  rentFeature: '월세 송금',
+  rentFeatureDesc: '정산 Payment + Memo 서비스',
+  sbtFeature: 'SBT',
+  sbtFeatureDesc: 'NFTokenMint 평판 증명 서비스',
+  autoReturnFeature: '자동 반환',
+  autoReturnFeatureDesc: 'EscrowFinish 반환 TX',
+  remittanceFeature: '본국 송금',
+  remittanceFeatureDesc: 'Payment 송금 TX',
+  realTx: '실제 TX',
+  serviceReady: '서비스 구현',
+  runRentPayment: '월세 송금 실행',
+  runningRentPayment: '월세 송금 중',
+  rentPaymentDone: '월세 송금 완료',
+  runAutoReturn: '자동 반환 실행',
+  runningAutoReturn: '반환 실행 중',
+  autoReturnDone: '자동 반환 완료',
+  mintSbt: '평판 SBT 발행',
+  mintingSbt: 'SBT 발행 중',
+  sbtMinted: '평판 SBT 발행 완료',
+  runRemittance: '본국 송금 실행',
+  runningRemittance: '송금 중',
+  remittanceDone: '본국 송금 완료',
+  txReceipt: 'TX 영수증',
   signContinue: '서명하고 계속',
   createContract: '계약 생성',
   escrowTitle: '안전 송금 금액',
@@ -273,7 +329,7 @@ const ko = {
   be1EscrowResponse: 'BE1 에스크로 응답',
   xrplTxCreated: 'XRPL TX 생성',
   settlementStatus: '정산 상태',
-  landlordView: '임대인 화면',
+  landlordView: '임대인 화면 보기',
   lStartTitle: '임대인으로 시작하기',
   lStartDesc: '초대 또는 BE2 계약 응답에서 온 데이터만 표시해요.',
   noInvite: '초대 데이터가 없어요',
@@ -443,9 +499,11 @@ const en: typeof ko = {
   stake: 'Lockup amount',
   contractTerms: 'Contract terms',
   contractTermsDesc: 'Enter the real terms that will be sent to BE1 escrow.',
+  estimatedLockup: 'Estimated value',
+  autoCalculated: 'Shown as an XRPL value estimate from the deposit',
   startDate: 'Start date',
   endDate: 'End date',
-  missingContractTerms: 'Deposit, lockup amount, and contract dates are required',
+  missingContractTerms: 'Deposit and contract dates are required',
   connectLandlordWallet: 'Connect landlord wallet',
   connectTenantWallet: 'Connect tenant wallet',
   counterpartyWallet: 'Counterparty wallet',
@@ -453,6 +511,41 @@ const en: typeof ko = {
   counterpartyNeeded: 'Counterparty wallet is required',
   flowReady: 'Ready for the next step',
   tx: 'XRPL TX',
+  txKind: 'TX type',
+  network: 'Network',
+  realTxMode: 'Real XRPL Testnet TX',
+  realTxModeDesc: 'The button submits an EscrowCreate to Testnet. It usually takes 10-30 seconds.',
+  mockTxMode: 'Video mock TX mode',
+  mockTxModeDesc: 'The current URL has tx=mock, so the flow runs without chain submission.',
+  realTxDone: 'Real Testnet transaction completed',
+  realTxDoneDesc: 'You can verify the validated transaction in the XRPL explorer.',
+  txNotSubmitted: 'Not submitted',
+  featureCheck: 'Chain feature check',
+  escrowFeature: 'Escrow',
+  escrowFeatureDesc: 'BE1 EscrowCreate submit path',
+  rentFeature: 'Rent payment',
+  rentFeatureDesc: 'Settlement Payment + Memo service',
+  sbtFeature: 'SBT',
+  sbtFeatureDesc: 'NFTokenMint reputation proof service',
+  autoReturnFeature: 'Auto return',
+  autoReturnFeatureDesc: 'EscrowFinish return TX',
+  remittanceFeature: 'Remittance',
+  remittanceFeatureDesc: 'Payment remittance TX',
+  realTx: 'Real TX',
+  serviceReady: 'Service ready',
+  runRentPayment: 'Run rent payment',
+  runningRentPayment: 'Sending rent',
+  rentPaymentDone: 'Rent payment complete',
+  runAutoReturn: 'Run auto return',
+  runningAutoReturn: 'Returning deposit',
+  autoReturnDone: 'Auto return complete',
+  mintSbt: 'Mint reputation SBT',
+  mintingSbt: 'Minting SBT',
+  sbtMinted: 'Reputation SBT minted',
+  runRemittance: 'Run remittance',
+  runningRemittance: 'Sending remittance',
+  remittanceDone: 'Remittance complete',
+  txReceipt: 'TX receipt',
   signContinue: 'Sign and continue',
   createContract: 'Create contract',
   escrowTitle: 'Safe transfer amount',
@@ -536,7 +629,7 @@ const en: typeof ko = {
   be1EscrowResponse: 'BE1 escrow response',
   xrplTxCreated: 'XRPL TX created',
   settlementStatus: 'Settlement status',
-  landlordView: 'Landlord view',
+  landlordView: 'View landlord flow',
   lStartTitle: 'Start as landlord',
   lStartDesc: 'Only invite or BE2 contract response data is shown.',
   noInvite: 'No invite data',
@@ -616,6 +709,7 @@ const tenantScreens: ScreenDef[] = [
   { id: 't11', label: { ko: '안전 리포트', en: 'Safety report' }, group: 'tenant', component: T11Report },
   { id: 't12', label: { ko: '내정보', en: 'Profile' }, group: 'tenant', component: T12Reputation },
   { id: 't13', label: { ko: '공과금', en: 'Utilities' }, group: 'tenant', component: T13Bills },
+  { id: 't14', label: { ko: '월세 송금', en: 'Rent payment' }, group: 'tenant', component: T14RentPayment },
   { id: 't17', label: { ko: '퇴실 체크', en: 'Move-out' }, group: 'tenant', component: T17Moveout },
   { id: 't18', label: { ko: '반환 완료', en: 'Returned' }, group: 'tenant', component: T18Returned },
   { id: 't19', label: { ko: '본국 송금', en: 'Remittance' }, group: 'tenant', component: T19Fx },
@@ -634,16 +728,28 @@ const landlordScreens: ScreenDef[] = [
   { id: 'l10', label: { ko: '수익 리포트', en: 'Earnings' }, group: 'landlord', tab: 'landlord', component: L10Earnings },
   { id: 'l11', label: { ko: '보증금 정산', en: 'Settlement' }, group: 'landlord', component: L11DepositRelease },
   { id: 'l12', label: { ko: '거래 내역', en: 'Transactions' }, group: 'landlord', tab: 'landlord', component: L12Activity },
+  { id: 'l13', label: { ko: '내정보', en: 'Profile' }, group: 'landlord', tab: 'landlord', component: L13Profile },
 ]
 
 const walletScreen: ScreenDef = { id: 'wallet', label: { ko: '지갑 연결', en: 'Wallet' }, group: 'tenant', component: WalletConnect }
 const allScreens = [...tenantScreens.slice(0, 2), walletScreen, ...tenantScreens.slice(2), ...landlordScreens]
+let didApplyInitialReset = false
 
 function getInitialScreen(): ScreenId {
+  enableDemoModeFromUrl()
   const params = new URLSearchParams(window.location.search)
-  if (params.get('reset') === '1') localStorage.removeItem(appStorageKey)
+  if (params.get('reset') === '1' && !didApplyInitialReset) {
+    localStorage.removeItem(appStorageKey)
+    didApplyInitialReset = true
+  }
   const screen = params.get('screen') as ScreenId | null
+  if (screen && shouldStartFromEntry(screen, params)) return 't01'
   return screen && allScreens.some((item) => item.id === screen) ? screen : 't01'
+}
+
+function shouldStartFromEntry(screen: ScreenId, params: URLSearchParams) {
+  if (params.get('direct') === '1' || params.get('debug') === '1') return false
+  return ['role', 'wallet', 't02', 'l01'].includes(screen)
 }
 
 function getInitialRole(screenId: ScreenId): UserRole {
@@ -652,14 +758,27 @@ function getInitialRole(screenId: ScreenId): UserRole {
   return screenId.startsWith('l') ? 'landlord' : 'tenant'
 }
 
+function getInitialLang(): Lang {
+  const lang = new URLSearchParams(window.location.search).get('lang')
+  if (lang === 'ko' || lang === 'en') {
+    localStorage.setItem('bluesafe-lang', lang)
+    return lang
+  }
+  return (localStorage.getItem('bluesafe-lang') as Lang | null) ?? 'ko'
+}
+
 const appStorageKey = 'bluesafe-runtime-state-v2'
+const demoContractPayloadKey = 'bluesafe-demo-contract-payload'
+const demoReturnCompressionMs = 5_000
+const shouldResetRemoteDemoSession = () => new URLSearchParams(window.location.search).get('reset') === '1'
 
 function emptyContractDraft(): ContractDraft {
+  if (isDemoMode()) return { ...demoContractTerms }
   return { depositAmount: '', stakeAmount: '', startsAt: '', endsAt: '' }
 }
 
 function createInitialApp(selectedRole: UserRole): AppModel {
-  return {
+  return seedDemoCounterpartyState({
     selectedRole,
     walletConnected: false,
     walletProvider: '',
@@ -669,10 +788,120 @@ function createInitialApp(selectedRole: UserRole): AppModel {
     landlordId: '',
     tenantAddress: '',
     landlordAddress: '',
+    remittanceAddress: '',
+    remittanceAmountXrp: '0.1',
     contractDraft: emptyContractDraft(),
     settlements: [],
+    chainActions: {},
     backendEvents: [],
+  }, selectedRole)
+}
+
+function createDemoLinkedContract(status: ContractStatus = 'draft'): BackendContract {
+  return {
+    id: demoIds.be2Contract,
+    status,
+    tenantId: demoAddresses.tenant,
+    landlordId: demoAddresses.landlord,
+    tenantAddress: demoAddresses.tenant,
+    landlordAddress: demoAddresses.landlord,
+    depositAmount: demoContractTerms.depositAmount,
+    stakeAmount: demoContractTerms.stakeAmount,
+    startsAt: demoIso(demoContractTerms.startsAt),
+    endsAt: demoIso(demoContractTerms.endsAt),
+    updatedAt: new Date().toISOString(),
   }
+}
+
+function seedDemoCounterpartyState(app: AppModel, role: UserRole): AppModel {
+  if (!isDemoMode() || role !== 'landlord') return { ...app, selectedRole: role }
+  return {
+    ...app,
+    selectedRole: role,
+    tenantId: app.tenantId || demoAddresses.tenant,
+    tenantAddress: app.tenantAddress || demoAddresses.tenant,
+    contractDraft: isContractDraftReady(app.contractDraft) ? app.contractDraft : { ...demoContractTerms },
+    contract: app.contract ?? createDemoLinkedContract(),
+  }
+}
+
+function updateContractParticipant(contract: BackendContract | undefined, role: UserRole, account: string) {
+  if (!contract) return contract
+  return role === 'tenant'
+    ? { ...contract, tenantId: account, tenantAddress: account }
+    : { ...contract, landlordId: account, landlordAddress: account }
+}
+
+function mergeDemoAppState(local: AppModel, remote: Partial<AppModel>): AppModel {
+  return {
+    ...local,
+    walletConnected: local.walletConnected || Boolean(remote.walletConnected),
+    walletProvider: local.walletProvider || remote.walletProvider || '',
+    walletName: local.walletName || remote.walletName || '',
+    walletNetwork: local.walletNetwork || remote.walletNetwork || '',
+    tenantId: remote.tenantId || local.tenantId,
+    landlordId: remote.landlordId || local.landlordId,
+    tenantAddress: remote.tenantAddress || local.tenantAddress,
+    landlordAddress: remote.landlordAddress || local.landlordAddress,
+    remittanceAddress: remote.remittanceAddress || local.remittanceAddress,
+    remittanceAmountXrp: remote.remittanceAmountXrp || local.remittanceAmountXrp || '0.1',
+    contractDraft: normalizeContractDraft({ ...local.contractDraft, ...(remote.contractDraft ?? {}) }),
+    contract: pickNewestContract(local.contract, remote.contract),
+    xrplContract: pickNewestContract(local.xrplContract, remote.xrplContract),
+    settlements: pickLongestArray(local.settlements, remote.settlements),
+    chainActions: { ...local.chainActions, ...(remote.chainActions ?? {}) },
+    backendEvents: mergeEvents(local.backendEvents, remote.backendEvents),
+  }
+}
+
+function pickNewestContract(local?: BackendContract, remote?: BackendContract) {
+  if (!remote) return local
+  if (!local) return remote
+  if (remote.depositEscrowTxHash && !local.depositEscrowTxHash) return remote
+  const localTime = local.updatedAt ? Date.parse(local.updatedAt) : 0
+  const remoteTime = remote.updatedAt ? Date.parse(remote.updatedAt) : 0
+  return remoteTime >= localTime ? remote : local
+}
+
+function pickLongestArray<T>(local: T[], remote?: T[]) {
+  return Array.isArray(remote) && remote.length >= local.length ? remote : local
+}
+
+function mergeEvents(local: string[], remote?: string[]) {
+  return [...new Set([...(remote ?? []), ...local])].slice(0, 8)
+}
+
+function getSharedContractId(app: AppModel) {
+  return app.contract?.id ?? app.xrplContract?.id ?? (isDemoMode() ? demoIds.be2Contract : 'pending')
+}
+
+function buildInviteUrl(contractId: string, lang: Lang) {
+  const base = buildLandlordInviteOrigin()
+  const params = new URLSearchParams({
+    demo: isDemoMode() ? '1' : '0',
+    lang,
+    role: 'landlord',
+    contractId,
+  })
+  if (isDemoMode()) params.set('demoSession', getDemoSessionId())
+  if (isDemoMode() && !isRealDemoTxMode()) params.set('tx', 'mock')
+  return `${base}/?${params.toString()}`
+}
+
+function buildLandlordInviteOrigin() {
+  if (typeof window === 'undefined') return 'https://bluesafe.app'
+  if (!isDemoMode()) return window.location.origin
+
+  const params = new URLSearchParams(window.location.search)
+  const explicitOrigin = params.get('landlordOrigin')
+  if (explicitOrigin) return explicitOrigin
+
+  const url = new URL(window.location.href)
+  if (url.port === '5179') {
+    url.port = '5180'
+    return url.origin
+  }
+  return window.location.origin
 }
 
 function loadStoredApp(selectedRole: UserRole): AppModel {
@@ -680,14 +909,16 @@ function loadStoredApp(selectedRole: UserRole): AppModel {
     const raw = localStorage.getItem(appStorageKey)
     if (!raw) return createInitialApp(selectedRole)
     const stored = JSON.parse(raw) as Partial<AppModel>
-    return {
+    const storedDraft = normalizeContractDraft({ ...emptyContractDraft(), ...(stored.contractDraft ?? {}) })
+    return seedDemoCounterpartyState({
       ...createInitialApp(selectedRole),
       ...stored,
-      selectedRole: stored.selectedRole ?? selectedRole,
-      contractDraft: { ...emptyContractDraft(), ...(stored.contractDraft ?? {}) },
+      selectedRole,
+      contractDraft: isDemoMode() && !isContractDraftReady(storedDraft) ? { ...demoContractTerms } : storedDraft,
       settlements: Array.isArray(stored.settlements) ? stored.settlements : [],
+      chainActions: stored.chainActions ?? {},
       backendEvents: Array.isArray(stored.backendEvents) ? stored.backendEvents : [],
-    }
+    }, selectedRole)
   } catch {
     return createInitialApp(selectedRole)
   }
@@ -696,10 +927,12 @@ function loadStoredApp(selectedRole: UserRole): AppModel {
 function App() {
   const initialScreen = getInitialScreen()
   const [screenId, setScreenId] = useState<ScreenId>(initialScreen)
-  const [lang, setLang] = useState<Lang>((localStorage.getItem('bluesafe-lang') as Lang | null) ?? 'ko')
+  const [lang, setLang] = useState<Lang>(getInitialLang)
   const [app, setApp] = useState<AppModel>(() => loadStoredApp(getInitialRole(initialScreen)))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [demoSyncReady, setDemoSyncReady] = useState(!isDemoMode())
+  const demoSessionId = getDemoSessionId()
   const currentIndex = allScreens.findIndex((screen) => screen.id === screenId)
   const current = allScreens[currentIndex] ?? allScreens[0]
   const CurrentScreen = current.component
@@ -711,10 +944,43 @@ function App() {
   }
   useEffect(() => {
     localStorage.setItem(appStorageKey, JSON.stringify(app))
-  }, [app])
+    if (isDemoMode() && demoSyncReady) {
+      void bluesafeApi.saveDemoSession(demoSessionId, app).catch(() => undefined)
+    }
+  }, [app, demoSessionId, demoSyncReady])
+
+  useEffect(() => {
+    if (!isDemoMode()) return
+    let cancelled = false
+    const load = async () => {
+      try {
+        if (shouldResetRemoteDemoSession()) await bluesafeApi.clearDemoSession(demoSessionId)
+        const remote = await bluesafeApi.getDemoSession<AppModel>(demoSessionId)
+        if (!cancelled && remote?.state) setApp((prev) => mergeDemoAppState(prev, remote.state))
+      } catch {
+        /* demo sync should not block local rehearsal */
+      } finally {
+        if (!cancelled) setDemoSyncReady(true)
+      }
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [demoSessionId])
+
+  useEffect(() => {
+    if (!isDemoMode() || !demoSyncReady) return
+    const timer = window.setInterval(() => {
+      void bluesafeApi.getDemoSession<AppModel>(demoSessionId)
+        .then((remote) => {
+          if (remote?.state) setApp((prev) => mergeDemoAppState(prev, remote.state))
+        })
+        .catch(() => undefined)
+    }, 1800)
+    return () => window.clearInterval(timer)
+  }, [demoSessionId, demoSyncReady])
   const go = (id: ScreenId) => setScreenId(id)
   const next = () => setScreenId(allScreens[Math.min(currentIndex + 1, allScreens.length - 1)].id)
-  const back = () => setScreenId(allScreens[Math.max(currentIndex - 1, 0)].id)
+  const back = () => setScreenId(getBackTarget(screenId) ?? allScreens[Math.max(currentIndex - 1, 0)].id)
   const pushEvent = (message: string) => setApp((prev) => ({ ...prev, backendEvents: [message, ...prev.backendEvents].slice(0, 5) }))
   const run = async <T,>(label: string, task: () => Promise<T>) => {
     setBusy(true)
@@ -732,10 +998,21 @@ function App() {
       setBusy(false)
     }
   }
+  const storeChainAction = (key: ChainActionKey, receipt: ChainTxReceipt) => {
+    setApp((prev) => ({
+      ...prev,
+      chainActions: {
+        ...prev.chainActions,
+        [key]: receipt,
+      },
+    }))
+  }
 
   const actions: AppActions = {
-    selectRole: (role) => setApp((prev) => ({ ...prev, selectedRole: role })),
-    updateContractDraft: (patch) => setApp((prev) => ({ ...prev, contractDraft: { ...prev.contractDraft, ...patch } })),
+    selectRole: (role) => setApp((prev) => seedDemoCounterpartyState({ ...prev, selectedRole: role }, role)),
+    updateContractDraft: (patch) => setApp((prev) => ({ ...prev, contractDraft: normalizeContractDraft({ ...prev.contractDraft, ...patch }) })),
+    updateRemittanceAddress: (address) => setApp((prev) => ({ ...prev, remittanceAddress: address.trim() })),
+    updateRemittanceAmount: (amountXrp) => setApp((prev) => ({ ...prev, remittanceAmountXrp: amountXrp.trim() })),
     connectWallet: async () => {
       await run(lang === 'ko' ? 'BlueSafe 내부 XRPL 지갑 연결' : 'BlueSafe internal XRPL wallet connected', async () => {
         const session = await connectInternalWallet(app.selectedRole)
@@ -748,8 +1025,8 @@ function App() {
             walletNetwork: session.network,
           }
           return prev.selectedRole === 'tenant'
-            ? { ...nextState, tenantAddress: session.account, tenantId: session.account }
-            : { ...nextState, landlordAddress: session.account, landlordId: session.account }
+            ? { ...nextState, tenantAddress: session.account, tenantId: session.account, contract: updateContractParticipant(prev.contract, 'tenant', session.account) }
+            : { ...nextState, landlordAddress: session.account, landlordId: session.account, contract: updateContractParticipant(prev.contract, 'landlord', session.account) }
         })
       })
     },
@@ -760,8 +1037,8 @@ function App() {
         : (lang === 'ko' ? '임대인 내부 XRPL 지갑 연결' : 'Landlord internal XRPL wallet connected'), async () => {
         const session = await connectInternalWallet(role)
         setApp((prev) => role === 'tenant'
-          ? { ...prev, tenantAddress: session.account, tenantId: session.account }
-          : { ...prev, landlordAddress: session.account, landlordId: session.account })
+          ? { ...prev, tenantAddress: session.account, tenantId: session.account, contract: updateContractParticipant(prev.contract, 'tenant', session.account) }
+          : { ...prev, landlordAddress: session.account, landlordId: session.account, contract: updateContractParticipant(prev.contract, 'landlord', session.account) })
       })
     },
     createDraftContract: async () => {
@@ -777,6 +1054,12 @@ function App() {
         if (!isContractDraftReady(app.contractDraft)) throw new Error('Contract depositAmount, stakeAmount, startsAt and endsAt are required')
         const contract = await bluesafeApi.createOperationalContract({
           ...participants,
+          depositAmount: app.contractDraft.depositAmount,
+          stakeAmount: app.contractDraft.stakeAmount,
+          startsAt: new Date(app.contractDraft.startsAt).toISOString(),
+          endsAt: new Date(app.contractDraft.endsAt).toISOString(),
+        })
+        persistDemoContractPayload({
           depositAmount: app.contractDraft.depositAmount,
           stakeAmount: app.contractDraft.stakeAmount,
           startsAt: new Date(app.contractDraft.startsAt).toISOString(),
@@ -813,7 +1096,7 @@ function App() {
         })
         const txHash = xrplContract.depositEscrowTxHash
         if (!txHash) throw new Error('BE1 did not return an escrow transaction hash')
-        const anchored = await bluesafeApi.anchorEscrow(contract.id, txHash)
+        const anchored = withContractDraft(await bluesafeApi.anchorEscrow(contract.id, txHash), app.contractDraft)
         await bluesafeApi.trackTx({
           txHash,
           txType: 'EscrowCreate',
@@ -853,6 +1136,34 @@ function App() {
         setApp((prev) => ({ ...prev, settlements: [updated, ...prev.settlements.slice(1)] }))
       })
     },
+    runRentPayment: async () => run(lang === 'ko' ? '월세 Payment TX 생성' : 'Rent Payment TX created', async () => {
+      if (!app.tenantAddress || !app.landlordAddress) throw new Error('Tenant and landlord wallet addresses are required')
+      const receipt = await bluesafeApi.createRentPayment({ amountDrops: '100000' })
+      storeChainAction('rentPayment', receipt)
+      return receipt
+    }),
+    finishEscrow: async () => run(lang === 'ko' ? 'EscrowFinish 반환 TX 생성' : 'EscrowFinish return TX created', async () => {
+      const owner = app.xrplContract?.contractAccountAddress ?? app.tenantAddress
+      const offerSequence = app.xrplContract?.depositEscrowSequence
+      if (!owner || !offerSequence) throw new Error('Escrow owner and offerSequence are required')
+      const receipt = await bluesafeApi.finishEscrow({ owner, offerSequence })
+      storeChainAction('autoReturn', receipt)
+      return receipt
+    }),
+    mintSbt: async () => run(lang === 'ko' ? '평판 SBT NFTokenMint 생성' : 'Reputation SBT NFTokenMint created', async () => {
+      const receipt = await bluesafeApi.mintReputationSbt()
+      storeChainAction('sbt', receipt)
+      return receipt
+    }),
+    runRemittance: async (destinationAddress, amountXrp) => run(lang === 'ko' ? '본국 송금 Payment TX 생성' : 'Remittance Payment TX created', async () => {
+      if (!destinationAddress.trim()) throw new Error('Destination wallet address is required')
+      const amountDrops = xrpToDrops(amountXrp)
+      if (!amountDrops) throw new Error('Remittance amount must be greater than 0 XRP')
+      const receipt = await bluesafeApi.createRemittance({ destinationAddress: destinationAddress.trim(), amountDrops })
+      setApp((prev) => ({ ...prev, remittanceAddress: destinationAddress.trim(), remittanceAmountXrp: amountXrp.trim() }))
+      storeChainAction('remittance', receipt)
+      return receipt
+    }),
   }
 
   return (
@@ -885,8 +1196,8 @@ function T01Entry({ next, lang }: NavProps) {
   )
 }
 
-function RoleSelect({ go, actions, lang }: NavProps) {
-  const [role, setRole] = useState<UserRole>('tenant')
+function RoleSelect({ go, app, actions, lang }: NavProps) {
+  const [role, setRole] = useState<UserRole>(app.selectedRole)
   const c = copy[lang]
   const start = () => { actions.selectRole(role); go('wallet') }
   return (
@@ -969,11 +1280,23 @@ function T04Kyc({ next, lang }: NavProps) {
 function T05Invite({ next, app, actions, busy, error, lang }: NavProps) {
   const c = copy[lang]
   const landlordReady = Boolean(app.landlordAddress)
+  const sharedContractId = getSharedContractId(app)
+  const inviteUrl = buildInviteUrl(sharedContractId, lang)
   const connect = async () => { try { await actions.connectCounterpartyWallet() } catch { return } }
   return (
     <Page>
       <Hero title={c.inviteTitle} desc={c.inviteDesc} />
       <Card tone="soft">
+        <div className="invite-card">
+          <IconBox><ReceiptIcon /></IconBox>
+          <div>
+            <strong>{c.inviteLink}</strong>
+            <span className="invite-url">{inviteUrl}</span>
+          </div>
+        </div>
+      </Card>
+      <Card tone="soft">
+        <Info label={c.contractId} value={sharedContractId} mono />
         <Info label={c.tenantWallet} value={app.tenantAddress ? shortHash(app.tenantAddress) : c.walletNeeded} mono={Boolean(app.tenantAddress)} />
         <Info label={c.landlordWallet} value={app.landlordAddress ? shortHash(app.landlordAddress) : c.walletNeeded} mono={Boolean(app.landlordAddress)} />
       </Card>
@@ -1015,20 +1338,25 @@ function T07Pay({ next, actions, busy, error, app, lang }: NavProps) {
   const c = copy[lang]
   const contract = getPreparedContract(app)
   const amount = contract?.depositAmount
+  const displayAmount = amount ? krw(amount, lang) : c.responseNone
   const hasTenantWallet = Boolean(app.tenantAddress)
   const hasLandlordWallet = Boolean(app.landlordAddress)
   const hasTerms = isContractDraftReady(app.contractDraft)
   const canRunEscrow = Boolean(contract) && hasTenantWallet && hasLandlordWallet && hasTerms
+  const realDemoTx = isDemoMode() && isRealDemoTxMode()
+  const mockDemoTx = isDemoMode() && !isRealDemoTxMode()
   return (
     <Page>
       <Hero title={c.escrowTitle} desc={c.escrowDesc} />
       <Card tone="soft">
-        <Info label={c.depositAmount} value={amount ?? c.responseNone} strong={Boolean(amount)} />
+        <Info label={c.depositAmount} value={displayAmount} strong={Boolean(amount)} />
         <Info label={c.stake} value={contract?.stakeAmount ?? c.responseNone} />
         <Info label={c.tenantWallet} value={app.tenantAddress ? shortHash(app.tenantAddress) : c.walletNeeded} mono={hasTenantWallet} />
         <Info label={c.landlordWallet} value={app.landlordAddress ? shortHash(app.landlordAddress) : c.walletNeeded} mono={hasLandlordWallet} />
       </Card>
       <ListItem icon={<WalletIcon />} title={c.internalWallet} desc={canRunEscrow ? c.walletBothReady : !hasTerms ? c.missingContractTerms : c.walletBothNeeded} />
+      {realDemoTx && <Card tone="blue"><strong>{c.realTxMode}</strong><span>{c.realTxModeDesc}</span></Card>}
+      {mockDemoTx && <Card tone="yellow"><strong>{c.mockTxMode}</strong><span>{c.mockTxModeDesc}</span></Card>}
       <BackendInline error={error} />
       <BottomCTA disabled={!canRunEscrow || busy} label={busy ? c.creatingEscrow : c.createEscrow} onClick={async () => { try { await actions.lockDeposit(); next() } catch { return } }} />
     </Page>
@@ -1037,19 +1365,51 @@ function T07Pay({ next, actions, busy, error, app, lang }: NavProps) {
 
 function T08Receipt({ next, app, lang }: NavProps) {
   const c = copy[lang]
-  const txHash = app.xrplContract?.depositEscrowTxHash ?? app.contract?.depositEscrowTxHash
-  return <Page><Hero title={c.receiptTitle} desc={c.receiptDesc} /><Card tone="soft"><Info label="BE1" value={app.xrplContract?.id ?? c.responseNone} mono={Boolean(app.xrplContract?.id)} /><Info label={c.contractId} value={app.contract?.id ?? c.responseNone} mono={Boolean(app.contract?.id)} /><Info label={c.tx} value={txHash ? shortHash(txHash) : c.responseNone} mono={Boolean(txHash)} /><Info label={c.status} value={statusText(app.xrplContract?.status ?? app.contract?.status, lang)} /></Card><BottomCTA label={c.home} secondary={c.share} onClick={next} /></Page>
+  const chainContract = app.xrplContract ?? app.contract
+  const txHash = chainContract?.depositEscrowTxHash
+  const explorerUrl = chainContract?.explorerUrl ?? (txHash ? `https://testnet.xrpl.org/transactions/${txHash}` : undefined)
+  const txSubmitted = Boolean(txHash && (!isDemoMode() || isRealDemoTxMode()))
+  return (
+    <Page>
+      <Hero title={c.receiptTitle} desc={c.receiptDesc} />
+      <Card tone="soft">
+        <Info label="BE1" value={app.xrplContract?.id ?? c.responseNone} mono={Boolean(app.xrplContract?.id)} />
+        <Info label={c.contractId} value={app.contract?.id ?? c.responseNone} mono={Boolean(app.contract?.id)} />
+        <Info label={c.txKind} value={chainContract?.txKind ?? (txHash ? 'EscrowCreate' : c.responseNone)} />
+        <Info label={c.network} value={chainContract?.network ?? (txHash ? 'XRPL Testnet' : c.responseNone)} />
+        <Info label={c.tx} value={txHash ? shortHash(txHash) : c.responseNone} mono={Boolean(txHash)} />
+        <Info label={c.status} value={statusText(chainContract?.status, lang)} />
+        {explorerUrl && <a className="explorer-link" href={explorerUrl} target="_blank" rel="noreferrer">{c.explorer}</a>}
+      </Card>
+      <Card tone={txSubmitted ? 'blue' : 'yellow'}>
+        <strong>{txSubmitted ? c.realTxDone : c.mockTxMode}</strong>
+        <span>{txSubmitted ? c.realTxDoneDesc : c.mockTxModeDesc}</span>
+      </Card>
+      <Card tone="soft">
+        <strong>{c.featureCheck}</strong>
+        <div className="chain-check-list">
+          <ChainCheckRow title={c.escrowFeature} desc={c.escrowFeatureDesc} state={txSubmitted ? c.realTx : txHash ? c.txNotSubmitted : c.waiting} active={Boolean(txHash)} />
+          <ChainCheckRow title={c.rentFeature} desc={c.rentFeatureDesc} state={app.chainActions.rentPayment ? c.realTx : c.serviceReady} active />
+          <ChainCheckRow title={c.autoReturnFeature} desc={c.autoReturnFeatureDesc} state={app.chainActions.autoReturn ? c.realTx : c.serviceReady} active />
+          <ChainCheckRow title={c.sbtFeature} desc={c.sbtFeatureDesc} state={app.chainActions.sbt ? c.realTx : c.serviceReady} active />
+          <ChainCheckRow title={c.remittanceFeature} desc={c.remittanceFeatureDesc} state={app.chainActions.remittance ? c.realTx : c.serviceReady} active />
+        </div>
+      </Card>
+      <BottomCTA label={c.home} secondary={c.share} onClick={next} />
+    </Page>
+  )
 }
 
 function T09Home({ go, app, error, lang }: NavProps) {
   const c = copy[lang]
   const contract = getPreparedContract(app) ?? app.xrplContract
   const metrics = getLeaseMetrics(app)
-  const deposit = contract?.depositAmount ?? c.responseNone
+  const deposit = contract?.depositAmount ? krw(contract.depositAmount, lang) : c.responseNone
   const daysLeft = metrics ? `${metrics.daysLeft}` : c.responseNone
   const livedDays = metrics ? `${metrics.livedDays}${lang === 'ko' ? '일차' : ' days'}` : c.responseNone
   const txHash = app.xrplContract?.depositEscrowTxHash ?? app.contract?.depositEscrowTxHash
   const progressStyle = { '--progress': `${metrics?.progress ?? 0}%` } as CSSProperties
+  const actionTitle = lang === 'ko' ? '바로가기' : 'Shortcuts'
   return (
     <Page bottomNav>
       <div className="home-head"><span>BlueSafe</span></div>
@@ -1059,6 +1419,15 @@ function T09Home({ go, app, error, lang }: NavProps) {
         <div className="progress-card"><div className="progress-ring" style={progressStyle}><strong>{daysLeft}</strong><span>{c.daysLeft}</span></div><p>{c.untilExpiry}</p></div>
         <div className="living-card"><span>{c.living}</span><strong>{livedDays}</strong></div>
         <div className="quick-grid"><button onClick={() => go('t11')}>{c.report}</button><button onClick={() => go('t06')}>{c.contract}</button><button onClick={() => go('t10')}>{c.return}</button><button onClick={() => go('t12')}>{c.profile}</button></div>
+      </div>
+      <div className="home-actions">
+        <SectionTitle>{actionTitle}</SectionTitle>
+        <div className="action-grid">
+          <HomeActionButton title={c.rentFeature} onClick={() => go('t14')} />
+          <HomeActionButton title={c.autoReturnFeature} onClick={() => go('t10')} />
+          <HomeActionButton title={c.sbtFeature} onClick={() => go('t12')} />
+          <HomeActionButton title={c.remittanceFeature} onClick={() => go('t19')} />
+        </div>
       </div>
       <div className="home-tasks">
         <SectionTitle right={c.all}>{c.todayTodo}</SectionTitle>
@@ -1072,47 +1441,189 @@ function T09Home({ go, app, error, lang }: NavProps) {
   )
 }
 
-function T10Countdown({ app, actions, lang }: NavProps) {
+function T10Countdown({ go, app, actions, busy, error, lang }: NavProps) {
   const c = copy[lang]
+  const demoFastReturn = isDemoMode()
+  const [demoReturnMs, setDemoReturnMs] = useState(() => demoFastReturn ? demoReturnCompressionMs : 0)
+  const [demoSpinTick, setDemoSpinTick] = useState(0)
   const contract = getPreparedContract(app)
-  const metrics = getLeaseMetrics(app)
+  const metrics = getLeaseMetrics(app, 'return')
   const finishAfter = metrics?.finishAfter
-  const left = metrics?.returnLeft
+  const left = demoFastReturn ? getDemoRollingDuration(metrics?.returnLeft, demoReturnMs, demoSpinTick) : metrics?.returnLeft
   const settlement = app.settlements[0]
   // actions is recreated by App each render; this screen only needs an enter-time refresh.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { void actions.loadSettlements() }, [])
+  useEffect(() => {
+    if (!demoFastReturn) return
+    const readyAt = Date.now() + demoReturnCompressionMs
+    const timer = window.setInterval(() => {
+      setDemoReturnMs(Math.max(0, readyAt - Date.now()))
+      setDemoSpinTick((tick) => tick + 1)
+    }, 90)
+    return () => window.clearInterval(timer)
+  }, [demoFastReturn])
   const hasContractDates = Boolean(contract?.startsAt && contract?.endsAt)
   const hasTx = Boolean(app.xrplContract?.depositEscrowTxHash)
+  const returnWindowOpen = demoFastReturn ? demoReturnMs <= 0 : Boolean(left && left.totalMs <= 0)
+  const returnTxCandidate = app.chainActions.autoReturn
+  const returnTx = returnWindowOpen ? returnTxCandidate : undefined
   const progressItems: TimelineItem[] = settlement
     ? [
         { title: c.settlementResponse, desc: statusText(settlement.status, lang), state: 'done' },
-        { title: c.returnPrep, desc: settlement.id, state: 'pending' },
+        { title: returnTx ? (lang === 'ko' ? '반환 완료' : 'Return complete') : c.returnPrep, desc: settlement.id, state: returnTx ? 'done' : 'pending' },
       ]
     : [
         { title: c.period, desc: dateRange(contract?.startsAt, contract?.endsAt, lang), state: hasContractDates ? 'done' : 'pending' },
         { title: c.tx, desc: hasTx ? shortHash(app.xrplContract!.depositEscrowTxHash!) : c.responseNone, state: hasTx ? 'done' : 'pending' },
         { title: c.settlementStatus, desc: c.responseNone, state: 'pending' },
       ]
-  return <Page><Hero title={c.countdownTitle} desc={c.countdownDesc} /><div className="time-grid"><TimeBox value={left ? pad2(left.days) : c.responseNone} label={c.day} /><TimeBox value={left ? pad2(left.hours) : c.responseNone} label={c.hour} /><TimeBox value={left ? pad2(left.minutes) : c.responseNone} label={c.minute} /></div><Card tone="blue"><strong>{finishAfter ? c.noAction : c.contractWaiting}</strong><span>{finishAfter ? `${formatDate(finishAfter)} ${c.returnPrepDesc}` : c.noActionDesc}</span></Card><SectionTitle>{c.progress}</SectionTitle><Timeline items={progressItems} /></Page>
+  const canReturn = returnWindowOpen && Boolean(app.xrplContract?.depositEscrowTxHash && app.xrplContract?.depositEscrowSequence)
+  const runReturn = async () => {
+    if (!canReturn) return
+    try { await actions.finishEscrow() } catch { return }
+  }
+  const returnButtonLabel = returnTx ? c.home : !returnWindowOpen ? c.waiting : busy ? c.runningAutoReturn : c.runAutoReturn
+  const returnCardTitle = returnTx
+    ? c.autoReturnDone
+    : demoFastReturn && returnWindowOpen
+      ? c.returnPrep
+      : demoFastReturn
+        ? c.waiting
+        : finishAfter ? c.noAction : c.contractWaiting
+  const returnCardDesc = returnTx
+    ? shortHash(returnTx.txHash)
+    : demoFastReturn && returnWindowOpen
+      ? (lang === 'ko' ? '데모 반환 조건이 열렸어요. 이제 자동 반환을 실행할 수 있어요.' : 'Demo return window is open. You can run auto return now.')
+      : demoFastReturn
+        ? (lang === 'ko' ? '데모에서는 5초 뒤 자동 반환 조건이 열려요.' : 'In demo mode, auto return opens after 5 seconds.')
+        : finishAfter ? `${formatDate(finishAfter)} ${c.returnPrepDesc}` : c.noActionDesc
+  return (
+    <Page>
+      <Hero title={c.countdownTitle} desc={c.countdownDesc} />
+      <div className={demoFastReturn ? `time-grid demo-fast${returnWindowOpen ? '' : ' is-spinning'}` : 'time-grid'}>
+        <TimeBox value={left ? pad2(left.days) : c.responseNone} label={c.day} />
+        <TimeBox value={left ? pad2(left.hours) : c.responseNone} label={c.hour} />
+        <TimeBox value={left ? pad2(left.minutes) : c.responseNone} label={c.minute} />
+        {demoFastReturn && <TimeBox value={left ? pad2(left.seconds) : c.responseNone} label={lang === 'ko' ? '초' : 'sec'} />}
+      </div>
+      <Card tone="blue"><strong>{returnCardTitle}</strong><span>{returnCardDesc}</span></Card>
+      {returnTx && <ChainReceiptCard receipt={returnTx} lang={lang} />}
+      <SectionTitle>{c.progress}</SectionTitle>
+      <Timeline items={returnTx ? [{ title: c.autoReturnFeature, desc: shortHash(returnTx.txHash), state: 'done' }, ...progressItems] : progressItems} />
+      <BackendInline error={returnTx ? undefined : error} />
+      <BottomCTA disabled={!returnTx && (!canReturn || busy)} label={returnButtonLabel} onClick={returnTx ? () => go('t09') : runReturn} />
+    </Page>
+  )
 }
 
-function T11Report({ app, lang }: NavProps) {
+function T11Report({ go, app, lang }: NavProps) {
   const c = copy[lang]
   const hasContract = Boolean(app.contract || app.xrplContract)
   const hasSettlement = app.settlements.length > 0
-  return <Page><Hero title={c.reportTitle} desc={c.reportDesc} /><Card tone="soft"><strong>{c.noScore}</strong><span>{c.noScoreDesc}</span></Card><SectionTitle>{c.signals}</SectionTitle><ListItem icon={<ReceiptIcon />} title={c.contract} desc={hasContract ? statusText(app.contract?.status ?? app.xrplContract?.status, lang) : c.responseNone} action={hasContract ? c.complete : c.waiting} /><ListItem icon={<WalletIcon />} title={c.settlement} desc={hasSettlement ? statusText(app.settlements[0]?.status, lang) : c.responseNone} action={hasSettlement ? c.complete : c.waiting} /></Page>
+  if (isDemoMode()) {
+    return (
+      <Page>
+        <Hero title={lang === 'ko' ? '8월 안전 리포트' : 'August safety report'} desc="2026.08 · BlueSafe Trust" />
+        <div className="report-summary">
+          <div className="score-card"><span>{lang === 'ko' ? '안전 점수' : 'Safety score'}</span><strong>97</strong><p>/100</p></div>
+          <div className="score-delta"><span>{lang === 'ko' ? '지난달보다' : 'From last month'}</span><strong>+3 ↑</strong><p>{lang === 'ko' ? '좋아졌어요' : 'Improved'}</p></div>
+        </div>
+        <SectionTitle>{lang === 'ko' ? '항목별 점수' : 'Signals'}</SectionTitle>
+        <Card tone="soft">
+          <Info label={lang === 'ko' ? '월세 정시 납부' : 'On-time rent'} value="6/6" strong />
+          <Info label={lang === 'ko' ? '공과금 적정성' : 'Utility fit'} value={lang === 'ko' ? '평균 대비 +12%' : '+12% vs avg'} />
+          <Info label={lang === 'ko' ? '집주인 응답성' : 'Landlord response'} value={lang === 'ko' ? '평균 4시간' : '4h avg'} />
+          <Info label={lang === 'ko' ? '문서 보관' : 'Documents'} value={lang === 'ko' ? '모두 완료' : 'Complete'} />
+        </Card>
+        <BottomCTA label={c.home} onClick={() => go('t09')} />
+      </Page>
+    )
+  }
+  return <Page><Hero title={c.reportTitle} desc={c.reportDesc} /><Card tone="soft"><strong>{c.noScore}</strong><span>{c.noScoreDesc}</span></Card><SectionTitle>{c.signals}</SectionTitle><ListItem icon={<ReceiptIcon />} title={c.contract} desc={hasContract ? statusText(app.contract?.status ?? app.xrplContract?.status, lang) : c.responseNone} action={hasContract ? c.complete : c.waiting} /><ListItem icon={<WalletIcon />} title={c.settlement} desc={hasSettlement ? statusText(app.settlements[0]?.status, lang) : c.responseNone} action={hasSettlement ? c.complete : c.waiting} /><BottomCTA label={c.home} onClick={() => go('t09')} /></Page>
 }
 
-function T12Reputation({ go, app, lang, setLang }: NavProps) {
+function T12Reputation({ go, app, actions, busy, error, lang, setLang }: NavProps) {
   const c = copy[lang]
   const hasContract = Boolean(app.contract || app.xrplContract)
+  if (isDemoMode()) {
+    const sbtTx = app.chainActions.sbt
+    const mint = async () => { try { await actions.mintSbt() } catch { return } }
+    const stages = [
+      ['🌊', lang === 'ko' ? '바다' : 'Ocean', 'Ocean', '99-100'],
+      ['💧', lang === 'ko' ? '샘' : 'Spring', 'Spring', '80-98'],
+      ['🏞️', lang === 'ko' ? '시내' : 'Stream', 'Stream', '60-79'],
+      ['💦', lang === 'ko' ? '한 방울' : 'Drop', 'Drop', '36.5-59'],
+    ]
+    return (
+      <Page>
+        <Hero title={c.reputationTitle} desc={c.reputationDesc} />
+        <div className="reputation-card stage-spring">
+          <img src={reputationMascot} alt="" className="reputation-mascot" />
+          <small>SPRING</small>
+          <strong>{lang === 'ko' ? '지금은 샘' : 'Spring now'}</strong>
+          <span>{lang === 'ko' ? '97점 · 다음 바다까지 +2' : '97 pts · +2 to Ocean'}</span>
+          <div className="stage-meter"><i style={{ width: '97%' }} /></div>
+        </div>
+        <SectionTitle>{lang === 'ko' ? '차오르는 단계' : 'Reputation stages'}</SectionTitle>
+        <div className="stage-list">
+          {stages.map(([emoji, title, sub, range]) => <div key={sub} className={sub === 'Spring' ? 'active' : ''}><span>{emoji}</span><p><strong>{title}</strong><small>{sub}</small></p><em>{range}</em></div>)}
+        </div>
+        {sbtTx && <ChainReceiptCard receipt={sbtTx} lang={lang} />}
+        <SectionTitle>{c.settings}</SectionTitle>
+        <Card tone="soft"><div className="setting-row"><div><strong>{c.language}</strong><span>{lang === 'ko' ? c.korean : c.english}</span></div><LanguageSegment lang={lang} onChange={setLang} /></div></Card>
+        <BackendInline error={error} />
+        <BottomCTA label={sbtTx ? c.home : busy ? c.mintingSbt : c.mintSbt} secondary={sbtTx ? c.share : undefined} onClick={sbtTx ? () => go('t09') : mint} />
+      </Page>
+    )
+  }
   return <Page><Hero title={c.profile} desc={c.reputationDesc} /><Card tone="soft"><strong>{c.noGrade}</strong><span>{c.noGradeDesc}</span></Card><SectionTitle>{c.settings}</SectionTitle><Card tone="soft"><div className="setting-row"><div><strong>{c.language}</strong><span>{lang === 'ko' ? c.korean : c.english}</span></div><LanguageSegment lang={lang} onChange={setLang} /></div></Card><SectionTitle>{c.requiredSignals}</SectionTitle><ListItem icon={<ReceiptIcon />} title={c.contractHistory} desc={hasContract ? c.be2ContractResponse : c.responseNone} action={hasContract ? c.complete : c.waiting} /><ListItem icon={<ShieldIcon />} title={c.escrowHistory} desc={app.xrplContract ? c.be1EscrowResponse : c.responseNone} action={app.xrplContract ? c.complete : c.waiting} /><BottomCTA label={c.home} secondary={c.share} onClick={() => go('t09')} /></Page>
 }
 
 function T13Bills({ go, lang }: NavProps) {
   const c = copy[lang]
+  if (isDemoMode()) {
+    return (
+      <Page bottomNav>
+        <Hero title={lang === 'ko' ? '8월 공과금' : 'August utilities'} desc={lang === 'ko' ? '평년 데이터와 자동으로 비교해요' : 'Compared with normal usage.'} />
+        <div className="total-bill"><span>{lang === 'ko' ? '청구 총액' : 'Total bill'}</span><strong>{krw(127400, lang)}</strong><p>{lang === 'ko' ? '평소 대비 +14,200원 (12.5%↑)' : '+14,200 KRW vs usual (12.5%↑)'}</p></div>
+        <SectionTitle>{lang === 'ko' ? '항목별' : 'By item'}</SectionTitle>
+        <div className="bill"><span className="bill-icon"><CheckIcon /></span><div><strong>{lang === 'ko' ? '전기' : 'Electricity'}</strong><small>{lang === 'ko' ? '8월 청구' : 'August bill'}</small></div><div className="bill-tail"><strong>{krw(48200, lang)}</strong><em>+3.1%</em></div></div>
+        <div className="bill"><span className="bill-icon warn">!</span><div><strong>{lang === 'ko' ? '가스' : 'Gas'}</strong><small>{lang === 'ko' ? '8월 청구' : 'August bill'}</small></div><div className="bill-tail"><strong>{krw(31000, lang)}</strong><em className="warn">+12.5%</em></div></div>
+        <div className="bill"><span className="bill-icon"><CheckIcon /></span><div><strong>{lang === 'ko' ? '수도' : 'Water'}</strong><small>{lang === 'ko' ? '8월 청구' : 'August bill'}</small></div><div className="bill-tail"><strong>{krw(18200, lang)}</strong><em>-2.0%</em></div></div>
+        <div className="bill"><span className="bill-icon"><CheckIcon /></span><div><strong>{lang === 'ko' ? '인터넷' : 'Internet'}</strong><small>{lang === 'ko' ? '8월 청구' : 'August bill'}</small></div><div className="bill-tail"><strong>{krw(30000, lang)}</strong><em>0%</em></div></div>
+        <BottomCTA label={c.confirm} secondary={c.later} onClick={() => go('t09')} />
+      </Page>
+    )
+  }
   return <Page bottomNav><Hero title={c.utilityTitle} desc={c.utilityDesc} /><Card tone="soft"><strong>{c.utilityDisabled}</strong><span>{c.utilityDisabledDesc}</span></Card><BottomCTA label={c.home} secondary={c.later} onClick={() => go('t09')} /></Page>
+}
+
+function T14RentPayment({ app, actions, busy, error, lang }: NavProps) {
+  const c = copy[lang]
+  const [visibleRentReceipt, setVisibleRentReceipt] = useState<ChainTxReceipt>()
+  const rentTx = visibleRentReceipt ?? app.chainActions.rentPayment ?? undefined
+  const canSendRent = Boolean(app.tenantAddress && app.landlordAddress && !busy)
+  const sendRent = async () => {
+    try {
+      const receipt = await actions.runRentPayment()
+      setVisibleRentReceipt(receipt)
+    } catch { return }
+  }
+  return (
+    <Page>
+      <Hero title={c.rentFeature} desc={lang === 'ko' ? '이번 달 월세를 XRPL Payment TX로 송금해요.' : 'Send this month rent as an XRPL Payment TX.'} />
+      <Card tone="soft">
+        <Info label={c.amount} value={krw(680000, lang)} strong />
+        <Info label={c.tenantWallet} value={app.tenantAddress ? shortHash(app.tenantAddress) : c.walletNeeded} mono={Boolean(app.tenantAddress)} />
+        <Info label={c.landlordWallet} value={app.landlordAddress ? shortHash(app.landlordAddress) : c.walletNeeded} mono={Boolean(app.landlordAddress)} />
+        <Info label={c.status} value={rentTx ? c.rentPaymentDone : (lang === 'ko' ? '송금 전' : 'Ready to send')} />
+      </Card>
+      {rentTx && <ChainReceiptCard receipt={rentTx} lang={lang} />}
+      <BackendInline error={error} />
+      <BottomCTA disabled={!canSendRent} label={busy ? c.runningRentPayment : rentTx ? (lang === 'ko' ? '다시 송금하기' : 'Send again') : c.runRentPayment} onClick={sendRent} />
+    </Page>
+  )
 }
 
 function T17Moveout({ next, app, lang }: NavProps) {
@@ -1127,23 +1638,65 @@ function T18Returned({ next, app, lang }: NavProps) {
   return <Page><Hero title={c.returnedTitle} desc={c.returnedDesc} />{settlement ? <Card><Info label={c.settlementId} value={settlement.id} mono /><Info label={c.status} value={statusText(settlement.status, lang)} /><Info label={c.amount} value={settlement.amountMinor ? krw(settlement.amountMinor, lang) : c.noAmount} strong /></Card> : <Card tone="soft"><strong>{c.noReturnData}</strong><span>{c.noReturnDataDesc}</span></Card>}<BottomCTA label={c.prepareRemittance} secondary={c.onchainReceipt} onClick={next} /></Page>
 }
 
-function T19Fx({ next, app, lang }: NavProps) {
+function T19Fx({ app, actions, busy, error, lang }: NavProps) {
   const c = copy[lang]
   const settlement = app.settlements[0]
-  return <Page><Hero title={c.fxTitle} desc={c.fxDesc} /><Card tone="soft"><strong>{settlement ? c.settlementFound : c.noFxData}</strong><span>{settlement?.amountMinor ? krw(settlement.amountMinor, lang) : c.noReturnDataDesc}</span></Card><SectionTitle>{c.requiredSignals}</SectionTitle><ListItem icon={<WalletIcon />} title={c.settlementTotal} desc={settlement ? statusText(settlement.status, lang) : c.responseNone} action={settlement ? c.complete : c.waiting} /><ListItem icon={<UserIcon />} title={c.recipient} desc={c.recipientWaiting} action={c.waiting} /><BottomCTA label={c.confirm} onClick={next} /></Page>
+  const [visibleRemittanceHash, setVisibleRemittanceHash] = useState<string>()
+  const destinationAddress = app.remittanceAddress
+  const amountXrp = app.remittanceAmountXrp || '0.1'
+  const amountDrops = xrpToDrops(amountXrp)
+  const remittanceTxCandidate = app.chainActions.remittance
+  const remittanceTx = remittanceTxCandidate && remittanceTxCandidate.txHash === visibleRemittanceHash && remittanceTxCandidate.destinationAddress === destinationAddress && remittanceTxCandidate.amountDrops === amountDrops
+    ? remittanceTxCandidate
+    : undefined
+  const canSend = Boolean(destinationAddress && amountDrops && app.tenantAddress && !busy)
+  const send = async () => {
+    try {
+      const receipt = await actions.runRemittance(destinationAddress, amountXrp)
+      setVisibleRemittanceHash(receipt.txHash)
+    } catch { return }
+  }
+  return (
+    <Page>
+      <Hero title={c.fxTitle} desc={c.fxDesc} />
+      <Card tone="soft">
+        <strong>{remittanceTx ? c.remittanceDone : settlement ? c.settlementFound : c.noFxData}</strong>
+        <span>{remittanceTx ? shortHash(remittanceTx.txHash) : settlement?.amountMinor ? krw(settlement.amountMinor, lang) : c.noReturnDataDesc}</span>
+        <label className="flow-field">
+          <span>{lang === 'ko' ? '받는 XRPL 지갑주소' : 'Recipient XRPL wallet'}</span>
+          <input value={destinationAddress} placeholder="r..." onChange={(event) => actions.updateRemittanceAddress(event.currentTarget.value)} />
+        </label>
+        <label className="flow-field">
+          <span>{lang === 'ko' ? '송금 수량 (XRP)' : 'Amount (XRP)'}</span>
+          <input value={amountXrp} inputMode="decimal" placeholder="0.1" onChange={(event) => actions.updateRemittanceAmount(event.currentTarget.value)} />
+        </label>
+        <Info label={lang === 'ko' ? '전송 단위' : 'Network amount'} value={amountDrops ? `${amountDrops} drops` : c.responseNone} mono={Boolean(amountDrops)} />
+        <Info label={c.tenantWallet} value={app.tenantAddress ? shortHash(app.tenantAddress) : c.walletNeeded} mono={Boolean(app.tenantAddress)} />
+        <Info label={c.recipient} value={destinationAddress || c.responseNone} mono={Boolean(destinationAddress)} />
+      </Card>
+      {remittanceTx && <ChainReceiptCard receipt={remittanceTx} lang={lang} />}
+      <SectionTitle>{c.requiredSignals}</SectionTitle>
+      <ListItem icon={<WalletIcon />} title={c.settlementTotal} desc={settlement ? statusText(settlement.status, lang) : c.responseNone} action={settlement ? c.complete : c.waiting} />
+      <ListItem icon={<UserIcon />} title={c.recipient} desc={remittanceTx ? c.remittanceDone : destinationAddress || c.recipientWaiting} action={remittanceTx ? c.complete : c.waiting} />
+      <BackendInline error={error} />
+      <BottomCTA disabled={!canSend} label={busy ? c.runningRemittance : remittanceTx ? (lang === 'ko' ? '다시 송금하기' : 'Send again') : c.runRemittance} onClick={send} />
+    </Page>
+  )
 }
 
-function T20Activity({ next, app, lang }: NavProps) {
+function T20Activity({ app, lang }: NavProps) {
   const c = copy[lang]
   const rows = buildTenantRows(app, lang)
-  return <Page bottomNav><Hero title={c.activityTitle} desc={c.activityDesc} /><div className="chip-wrap compact"><span className="chip selected">{c.all}</span><span className="chip">{c.walletCreated}</span><span className="chip">{c.contract}</span></div>{rows.length > 0 ? <ActivityRows rows={rows} /> : <Card tone="soft"><strong>{c.activityEmpty}</strong><span>{c.activityEmptyDesc}</span></Card>}<BottomCTA label={c.landlordView} onClick={next} /></Page>
+  return <Page bottomNav><Hero title={c.activityTitle} desc={c.activityDesc} /><div className="chip-wrap compact"><span className="chip selected">{c.all}</span><span className="chip">{c.walletCreated}</span><span className="chip">{c.contract}</span></div>{rows.length > 0 ? <ActivityRows rows={rows} /> : <Card tone="soft"><strong>{c.activityEmpty}</strong><span>{c.activityEmptyDesc}</span></Card>}<BottomSpace /></Page>
 }
 
 function L01Invited({ next, app, actions, busy, error, lang }: NavProps) {
   const c = copy[lang]
   const tenantReady = Boolean(app.tenantAddress)
+  const sharedContractId = getSharedContractId(app)
+  const inviteUrl = buildInviteUrl(sharedContractId, lang)
   const connect = async () => { try { await actions.connectCounterpartyWallet() } catch { return } }
-  return <Page><div className="home-head"><span>BlueSafe</span></div><Hero title={c.lStartTitle} desc={c.lStartDesc} /><Card tone="soft"><Info label={c.landlordWallet} value={app.landlordAddress ? shortHash(app.landlordAddress) : c.walletNeeded} mono={Boolean(app.landlordAddress)} /><Info label={c.tenantWallet} value={app.tenantAddress ? shortHash(app.tenantAddress) : c.walletNeeded} mono={Boolean(app.tenantAddress)} /><Info label={c.contractId} value={app.contract?.id ?? c.responseNone} mono={Boolean(app.contract?.id)} /></Card><BackendInline error={error} /><BottomCTA label={tenantReady ? c.viewContract : busy ? c.walletConnecting : c.connectTenantWallet} secondary={tenantReady ? c.later : undefined} onClick={tenantReady ? next : connect} /></Page>
+  return <Page><div className="home-head"><span>BlueSafe</span></div><Hero title={c.lStartTitle} desc={c.lStartDesc} /><Card tone="soft"><div className="invite-card"><IconBox><ReceiptIcon /></IconBox><div><strong>{c.inviteLink}</strong><span className="invite-url">{inviteUrl}</span></div></div></Card><Card tone="soft"><Info label={c.landlordWallet} value={app.landlordAddress ? shortHash(app.landlordAddress) : c.walletNeeded} mono={Boolean(app.landlordAddress)} /><Info label={c.tenantWallet} value={app.tenantAddress ? shortHash(app.tenantAddress) : c.walletNeeded} mono={Boolean(app.tenantAddress)} /><Info label={c.contractId} value={sharedContractId} mono={Boolean(sharedContractId)} /></Card><BackendInline error={error} /><BottomCTA label={tenantReady ? c.viewContract : busy ? c.walletConnecting : c.connectTenantWallet} secondary={tenantReady ? c.later : undefined} onClick={tenantReady ? next : connect} /></Page>
 }
 
 function L02Verify({ next, lang }: NavProps) {
@@ -1183,9 +1736,11 @@ function L07Detail({ app, lang }: NavProps) {
   return <Page><Hero title={c.propertyDetail} desc={c.propertyDetailDesc} /><Card tone="soft"><Info label="BE2" value={app.contract?.id ?? c.responseNone} mono={Boolean(app.contract?.id)} /><Info label="BE1" value={app.xrplContract?.id ?? c.responseNone} mono={Boolean(app.xrplContract?.id)} /><Info label={c.status} value={statusText(app.contract?.status ?? app.xrplContract?.status, lang)} /></Card><SectionTitle>{c.tenant}</SectionTitle><ListItem icon={<UserIcon />} title={c.tenantId} desc={app.tenantId || (app.tenantAddress ? shortHash(app.tenantAddress) : c.responseNone)} action={app.tenantAddress ? c.walletLinked : c.waiting} /></Page>
 }
 
-function L08LateRent({ next, app, lang }: NavProps) {
+function L08LateRent({ next, app, actions, busy, error, lang }: NavProps) {
   const c = copy[lang]
-  return <Page><Hero title={c.rentStatus} desc={c.rentStatusDesc} /><Card tone="soft"><strong>{c.noRentEvent}</strong><span>{app.settlements.length ? c.settlementResponse : c.noReturnDataDesc}</span></Card><BottomCTA label={c.confirm} secondary={c.later} onClick={next} /></Page>
+  const rentTx = app.chainActions.rentPayment
+  const sendRent = async () => { try { await actions.runRentPayment() } catch { return } }
+  return <Page><Hero title={c.rentStatus} desc={c.rentStatusDesc} /><Card tone="soft"><strong>{rentTx ? c.rentPaymentDone : c.noRentEvent}</strong><span>{rentTx ? shortHash(rentTx.txHash) : app.settlements.length ? c.settlementResponse : c.noReturnDataDesc}</span></Card>{rentTx && <ChainReceiptCard receipt={rentTx} lang={lang} />}<BackendInline error={error} /><BottomCTA label={rentTx ? c.confirm : busy ? c.runningRentPayment : c.runRentPayment} secondary={rentTx ? undefined : c.later} onClick={rentTx ? next : sendRent} /></Page>
 }
 
 function L10Earnings({ next, app, lang }: NavProps) {
@@ -1206,6 +1761,30 @@ function L12Activity({ app, lang }: NavProps) {
   const c = copy[lang]
   const rows = buildLandlordRows(app, lang)
   return <Page bottomNav><Hero title={c.transactionHistory} desc={c.transactionHistoryDesc} /><div className="chip-wrap compact"><span className="chip selected">{c.all}</span><span className="chip">{c.contract}</span><span className="chip">{c.settlement}</span></div>{rows.length ? <ActivityRows rows={rows} /> : <Card tone="soft"><strong>{c.noTransactionHistory}</strong><span>{c.noTransactionHistoryDesc}</span></Card>}<BottomSpace /></Page>
+}
+
+function L13Profile({ app, lang, setLang }: NavProps) {
+  const c = copy[lang]
+  const contractStatus = statusText(app.contract?.status ?? app.xrplContract?.status, lang)
+  const rentTx = app.chainActions.rentPayment
+  return (
+    <Page bottomNav>
+      <Hero title={c.profile} desc={lang === 'ko' ? '임대인 계정과 연결된 계약 상태를 확인해요.' : 'Review the landlord account and linked contract state.'} />
+      <Card tone="soft">
+        <Info label={c.landlordWallet} value={app.landlordAddress ? shortHash(app.landlordAddress) : c.walletNeeded} mono={Boolean(app.landlordAddress)} />
+        <Info label={c.tenantWallet} value={app.tenantAddress ? shortHash(app.tenantAddress) : c.walletNeeded} mono={Boolean(app.tenantAddress)} />
+        <Info label={c.contractId} value={getSharedContractId(app)} mono />
+        <Info label={c.status} value={contractStatus} />
+      </Card>
+      <SectionTitle>{c.settings}</SectionTitle>
+      <Card tone="soft"><div className="setting-row"><div><strong>{c.language}</strong><span>{lang === 'ko' ? c.korean : c.english}</span></div><LanguageSegment lang={lang} onChange={setLang} /></div></Card>
+      <SectionTitle>{c.requiredSignals}</SectionTitle>
+      <ListItem icon={<ReceiptIcon />} title={c.contractHistory} desc={app.contract ? app.contract.id : c.responseNone} action={app.contract ? c.complete : c.waiting} />
+      <ListItem icon={<ShieldIcon />} title={c.escrowHistory} desc={app.xrplContract ? app.xrplContract.id : c.responseNone} action={app.xrplContract ? c.complete : c.waiting} />
+      <ListItem icon={<WalletIcon />} title={c.rentPaymentDone} desc={rentTx ? shortHash(rentTx.txHash) : c.responseNone} action={rentTx ? c.complete : c.waiting} />
+      <BottomSpace />
+    </Page>
+  )
 }
 
 function Page({ children, bottomNav = false }: { children: ReactNode; bottomNav?: boolean }) {
@@ -1248,12 +1827,35 @@ function ListItem({ icon, title, desc, action, onClick }: { icon: ReactNode; tit
   return <button className="list-item" onClick={onClick}><span className="list-icon">{icon}</span><span className="list-copy"><strong>{title}</strong>{desc && <small>{desc}</small>}</span>{action && <em>{action}</em>}</button>
 }
 
+function ChainCheckRow({ title, desc, state, active = false }: { title: string; desc: string; state: string; active?: boolean }) {
+  return <div className="chain-check-row"><span className={active ? 'active' : ''}>{active ? <CheckIcon /> : '•'}</span><div><strong>{title}</strong><small>{desc}</small></div><em>{state}</em></div>
+}
+
+function HomeActionButton({ title, onClick }: { title: string; onClick: () => void }) {
+  return <button className="home-action" type="button" onClick={onClick}><span>{title}</span></button>
+}
+
+function ChainReceiptCard({ receipt, lang }: { receipt: ChainTxReceipt; lang: Lang }) {
+  const c = copy[lang]
+  return (
+    <Card tone="soft">
+      <strong>{c.txReceipt}</strong>
+      <Info label={c.txKind} value={receipt.txType} />
+      <Info label={c.network} value={receipt.network} />
+      <Info label={c.tx} value={shortHash(receipt.txHash)} mono />
+      {receipt.amountDrops && <Info label={c.amount} value={dropsToXrpLabel(receipt.amountDrops)} />}
+      {receipt.explorerUrl && <a className="explorer-link" href={receipt.explorerUrl}>{c.explorer}</a>}
+    </Card>
+  )
+}
+
 function Info({ label, value, strong = false, mono = false }: { label: string; value: string; strong?: boolean; mono?: boolean }) {
   return <div className="info"><span>{label}</span><strong className={`${strong ? 'strong' : ''} ${mono ? 'mono' : ''}`}>{value}</strong></div>
 }
 
 function ContractTermsForm({ draft, onChange, lang }: { draft: ContractDraft; onChange: (patch: Partial<ContractDraft>) => void; lang: Lang }) {
   const c = copy[lang]
+  const lockupAmount = deriveStakeAmount(draft.depositAmount)
   return (
     <Card tone="soft">
       <div className="form-head">
@@ -1264,10 +1866,8 @@ function ContractTermsForm({ draft, onChange, lang }: { draft: ContractDraft; on
         <span>{c.depositAmount}</span>
         <input inputMode="numeric" value={draft.depositAmount} placeholder="0" onChange={(event) => onChange({ depositAmount: onlyDigits(event.currentTarget.value) })} />
       </label>
-      <label className="flow-field">
-        <span>{c.stake}</span>
-        <input inputMode="numeric" value={draft.stakeAmount} placeholder="0" onChange={(event) => onChange({ stakeAmount: onlyDigits(event.currentTarget.value) })} />
-      </label>
+      <Info label={c.estimatedLockup} value={lockupAmount ? `≈ ${formatPlainNumber(lockupAmount)} XRP` : c.responseNone} />
+      <p className="form-note">{c.autoCalculated}</p>
       <div className="date-grid">
         <label className="flow-field">
           <span>{c.startDate}</span>
@@ -1342,7 +1942,7 @@ function TenantNav({ active, go, lang }: { active: ScreenId; go: (id: ScreenId) 
 
 function LandlordNav({ active, go, lang }: { active: ScreenId; go: (id: ScreenId) => void; lang: Lang }) {
   const c = copy[lang]
-  return <nav className="bottom-nav four-tabs">{[['l06', c.home, <HomeIcon />], ['l10', c.revenue, <ChartIcon />], ['l12', c.contract, <ReceiptIcon />], ['l02', c.profile, <UserIcon />]].map(([id, label, icon]) => <button key={id as string} className={active === id ? 'active' : ''} onClick={() => go(id as ScreenId)}>{icon}<span>{label as string}</span></button>)}</nav>
+  return <nav className="bottom-nav four-tabs">{[['l06', c.home, <HomeIcon />], ['l10', c.revenue, <ChartIcon />], ['l12', c.contract, <ReceiptIcon />], ['l13', c.profile, <UserIcon />]].map(([id, label, icon]) => <button key={id as string} className={active === id ? 'active' : ''} onClick={() => go(id as ScreenId)}>{icon}<span>{label as string}</span></button>)}</nav>
 }
 
 function TimeBox({ value, label }: { value: string; label: string }) {
@@ -1365,6 +1965,22 @@ function krw(value: number | string, lang: Lang) {
   const numberValue = typeof value === 'number' ? value : Number(value)
   if (Number.isFinite(numberValue)) return `${numberValue.toLocaleString(lang === 'ko' ? 'ko-KR' : 'en-US')}원`
   return String(value)
+}
+
+function xrpToDrops(value: string) {
+  const normalized = value.trim().replace(/,/g, '')
+  if (!/^\d+(\.\d{0,6})?$/.test(normalized)) return undefined
+  const [whole, fraction = ''] = normalized.split('.')
+  const drops = BigInt(whole) * 1_000_000n + BigInt((fraction + '000000').slice(0, 6))
+  return drops > 0n ? drops.toString() : undefined
+}
+
+function dropsToXrpLabel(value: string) {
+  if (!/^\d+$/.test(value)) return `${value} drops`
+  const drops = BigInt(value)
+  const whole = drops / 1_000_000n
+  const fraction = (drops % 1_000_000n).toString().padStart(6, '0').replace(/0+$/, '')
+  return `${whole.toString()}${fraction ? `.${fraction}` : ''} XRP (${value} drops)`
 }
 
 function shortHash(value: string) {
@@ -1401,6 +2017,7 @@ function dateRange(start?: string, end?: string, lang: Lang = 'ko') {
 function localizeError(message: string, lang: Lang) {
   if (lang === 'en') {
     if (message.includes('Cannot POST /contracts')) return 'Full BE1 escrow API is not running'
+    if (message.includes('Destination wallet address') || message.includes('destinationAddress')) return 'Recipient XRPL wallet address is required'
     return message || 'Request failed'
   }
   if (!message) return '요청 처리에 실패했어요'
@@ -1409,6 +2026,7 @@ function localizeError(message: string, lang: Lang) {
   if (message.includes('Wallet API URL is not configured')) return '지갑 API 주소가 설정되지 않았어요'
   if (message.includes('URL is not configured')) return '백엔드 주소가 설정되지 않았어요'
   if (message.includes('wallet addresses are required')) return '임차인과 임대인 지갑 주소가 모두 필요해요'
+  if (message.includes('Destination wallet address') || message.includes('destinationAddress')) return '받는 XRPL 지갑주소가 필요해요'
   if (message.includes('identifiers are required')) return '임차인과 임대인 식별자가 모두 필요해요'
   if (message.includes('depositAmount') || message.includes('stakeAmount')) return '계약의 보증금 또는 락업 수량 응답이 필요해요'
   if (message.includes('startsAt') || message.includes('endsAt')) return '계약 시작일과 종료일 응답이 필요해요'
@@ -1426,6 +2044,10 @@ function buildTenantRows(app: AppModel, lang: Lang) {
   if (app.contract) rows.push(['', today, c.be2ContractResponse, app.contract.id, statusText(app.contract.status, lang)])
   if (app.xrplContract) rows.push(['', today, c.be1EscrowResponse, app.xrplContract.id, statusText(app.xrplContract.status, lang)])
   if (app.xrplContract?.depositEscrowTxHash) rows.push(['', today, c.xrplTxCreated, shortHash(app.xrplContract.depositEscrowTxHash), 'XRPL'])
+  if (app.chainActions.rentPayment) rows.push(['', today, c.rentPaymentDone, shortHash(app.chainActions.rentPayment.txHash), 'XRPL'])
+  if (isAutoReturnDisplayable(app) && app.chainActions.autoReturn) rows.push(['', today, c.autoReturnFeature, shortHash(app.chainActions.autoReturn.txHash), 'XRPL'])
+  if (app.chainActions.sbt) rows.push(['', today, c.sbtFeature, shortHash(app.chainActions.sbt.txHash), 'XRPL'])
+  if (app.chainActions.remittance) rows.push(['', today, c.remittanceFeature, shortHash(app.chainActions.remittance.txHash), 'XRPL'])
   app.settlements.forEach((settlement, index) => rows.push([index === 0 ? c.settlementResponse : '', today, c.settlementStatus, settlement.id, statusText(settlement.status, lang)]))
   return rows
 }
@@ -1436,8 +2058,15 @@ function buildLandlordRows(app: AppModel, lang: Lang) {
   const today = formatDate(new Date()).slice(5).replace('-', '.')
   if (app.contract) rows.push([c.contract, today, c.be2ContractResponse, app.contract.id, statusText(app.contract.status, lang)])
   if (app.xrplContract) rows.push(['', today, c.be1EscrowResponse, app.xrplContract.id, statusText(app.xrplContract.status, lang)])
+  if (app.chainActions.rentPayment) rows.push([c.rent, today, c.rentPaymentDone, shortHash(app.chainActions.rentPayment.txHash), 'XRPL'])
+  if (isAutoReturnDisplayable(app) && app.chainActions.autoReturn) rows.push(['', today, c.autoReturnDone, shortHash(app.chainActions.autoReturn.txHash), 'XRPL'])
   app.settlements.forEach((item, index) => rows.push([index === 0 ? c.settlement : '', today, c.settlementStatus, item.id, statusText(item.status, lang)]))
   return rows
+}
+
+function isAutoReturnDisplayable(app: AppModel) {
+  const metrics = getLeaseMetrics(app, 'return')
+  return Boolean(metrics && metrics.returnLeft.totalMs <= 0)
 }
 
 function getParticipantIds(app: AppModel) {
@@ -1449,6 +2078,23 @@ function getParticipantIds(app: AppModel) {
 
 function onlyDigits(value: string) {
   return value.replace(/\D/g, '')
+}
+
+function normalizeContractDraft(draft: ContractDraft): ContractDraft {
+  return {
+    ...draft,
+    stakeAmount: deriveStakeAmount(draft.depositAmount),
+  }
+}
+
+function deriveStakeAmount(depositAmount: string) {
+  const deposit = Number(onlyDigits(depositAmount))
+  if (!Number.isFinite(deposit) || deposit <= 0) return ''
+  return String(Math.round(deposit / 850))
+}
+
+function formatPlainNumber(value: string) {
+  return Number(value).toLocaleString('en-US')
 }
 
 function normalizeDateInput(value: string) {
@@ -1471,31 +2117,38 @@ function isContractDraftReady(draft: ContractDraft) {
 }
 
 function withContractDraft(contract: BackendContract, draft: ContractDraft): BackendContract {
+  const normalized = normalizeContractDraft(draft)
   return {
     ...contract,
-    depositAmount: contract.depositAmount || draft.depositAmount || undefined,
-    stakeAmount: contract.stakeAmount || draft.stakeAmount || undefined,
-    startsAt: contract.startsAt || draft.startsAt || undefined,
-    endsAt: contract.endsAt || draft.endsAt || undefined,
+    depositAmount: contract.depositAmount || normalized.depositAmount || undefined,
+    stakeAmount: normalized.stakeAmount || contract.stakeAmount || undefined,
+    startsAt: contract.startsAt || normalized.startsAt || undefined,
+    endsAt: contract.endsAt || normalized.endsAt || undefined,
   }
+}
+
+function persistDemoContractPayload(payload: DemoContractPayload) {
+  if (!isDemoMode()) return
+  localStorage.setItem(demoContractPayloadKey, JSON.stringify(payload))
 }
 
 function getPreparedContract(app: AppModel) {
   return app.contract ? withContractDraft(app.contract, app.contractDraft) : undefined
 }
 
-function getLeaseMetrics(app: AppModel) {
+function getLeaseMetrics(app: AppModel, phase: 'living' | 'return' = 'living') {
   const contract = getPreparedContract(app) ?? app.xrplContract
   const startsAt = parseDate(contract?.startsAt)
   const endsAt = parseDate(contract?.endsAt)
   if (!startsAt || !endsAt) return undefined
   const finishAfter = addDays(endsAt, 7)
-  const now = new Date()
+  const now = isDemoMode() ? getDemoNow(phase) : new Date()
   const totalMs = Math.max(1, endsAt.getTime() - startsAt.getTime())
   const elapsedMs = clamp(now.getTime() - startsAt.getTime(), 0, totalMs)
-  const daysLeft = Math.max(0, Math.ceil((endsAt.getTime() - now.getTime()) / dayMs))
-  const livedDays = Math.max(0, Math.floor((now.getTime() - startsAt.getTime()) / dayMs) + 1)
-  const progress = Math.round((elapsedMs / totalMs) * 100)
+  const effectiveNowMs = clamp(now.getTime(), startsAt.getTime(), endsAt.getTime())
+  const daysLeft = Math.max(0, Math.ceil((endsAt.getTime() - effectiveNowMs) / dayMs))
+  const livedDays = Math.max(0, Math.min(Math.floor((now.getTime() - startsAt.getTime()) / dayMs) + 1, Math.ceil(totalMs / dayMs)))
+  const progress = clamp(Math.round((elapsedMs / totalMs) * 100), 0, 100)
   const returnLeft = splitDuration(finishAfter.getTime() - now.getTime())
   return { startsAt, endsAt, finishAfter, daysLeft, livedDays, progress, returnLeft }
 }
@@ -1521,7 +2174,24 @@ function splitDuration(ms: number) {
   const days = Math.floor(totalMs / dayMs)
   const hours = Math.floor((totalMs % dayMs) / 3_600_000)
   const minutes = Math.floor((totalMs % 3_600_000) / 60_000)
-  return { totalMs, days, hours, minutes }
+  const seconds = Math.floor((totalMs % 60_000) / 1_000)
+  return { totalMs, days, hours, minutes, seconds }
+}
+
+function getDemoRollingDuration(source: ReturnType<typeof splitDuration> | undefined, remainingMs: number, tick: number) {
+  if (!source) return splitDuration(remainingMs)
+  if (remainingMs <= 220) return splitDuration(0)
+
+  const ratio = clamp(remainingMs / demoReturnCompressionMs, 0, 1)
+  const noise = pseudoRandom(tick)
+  const jitterWindow = Math.min(dayMs, source.totalMs * 0.035)
+  const jitterMs = (noise - 0.5) * jitterWindow * ratio
+  return splitDuration(clamp(source.totalMs * ratio + jitterMs, 0, source.totalMs))
+}
+
+function pseudoRandom(seed: number) {
+  const raw = Math.sin((seed + 1) * 12.9898) * 43758.5453
+  return raw - Math.floor(raw)
 }
 
 function pad2(value: number) {
@@ -1534,6 +2204,14 @@ function formatDate(date: Date) {
 
 function isChromeLessScreen(id: ScreenId) {
   return id === 'role' || id === 't02' || id === 't09' || id === 'l06'
+}
+
+function getBackTarget(id: ScreenId): ScreenId | undefined {
+  if ([
+    't06', 't10', 't11', 't12', 't13', 't14', 't17', 't18', 't19', 't20',
+  ].includes(id)) return 't09'
+  if (['l07', 'l08', 'l10', 'l11', 'l12', 'l13'].includes(id)) return 'l06'
+  return undefined
 }
 
 function ChevronLeftIcon() { return <svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" /></svg> }

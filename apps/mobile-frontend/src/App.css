@@ -1270,6 +1270,15 @@ svg {
   font-size: 13px;
 }
 
+.invite-card .invite-url {
+  max-width: 270px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #2563eb;
+  font-weight: 600;
+}
+
 .icon-box,
 .avatar {
   width: 48px;
@@ -1481,6 +1490,14 @@ svg {
 
 .flow-field input:focus {
   box-shadow: inset 0 0 0 1.5px var(--brand);
+}
+
+.form-note {
+  margin: -4px 0 10px;
+  color: #8b95a1;
+  font-size: 12px;
+  line-height: 17px;
+  font-weight: 700;
 }
 
 .date-grid {
@@ -2283,6 +2300,85 @@ svg {
   color: #d04343;
 }
 
+.explorer-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  margin-top: 14px;
+  border-radius: 16px;
+  background: #fff;
+  color: var(--brand);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 850;
+  text-decoration: none;
+}
+
+.chain-check-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.chain-check-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.chain-check-row > span {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  background: #fff;
+  color: var(--grey500);
+  font-size: 17px;
+  font-weight: 900;
+}
+
+.chain-check-row > span.active {
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.chain-check-row svg {
+  width: 18px;
+  height: 18px;
+}
+
+.chain-check-row strong,
+.chain-check-row small {
+  display: block;
+}
+
+.chain-check-row strong {
+  color: var(--grey900);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 850;
+}
+
+.chain-check-row small {
+  margin-top: 2px;
+  color: var(--grey600);
+  font-size: 12px;
+  line-height: 17px;
+  font-weight: 650;
+}
+
+.chain-check-row em {
+  color: var(--brand);
+  font-size: 12px;
+  line-height: 17px;
+  font-style: normal;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
 .hidden-input {
   position: fixed;
   width: 1px;
@@ -2512,6 +2608,43 @@ svg {
   box-shadow: none;
 }
 
+.home-actions {
+  margin: 14px 24px 0;
+  padding: 12px 10px 10px;
+  border-radius: 24px;
+  background: #f7f9fc;
+}
+
+.home-actions .section-title {
+  padding: 0 4px;
+  margin: 0 0 10px;
+}
+
+.action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.home-action {
+  min-width: 0;
+  min-height: 54px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 16px;
+  padding: 0 10px;
+  background: #fff;
+  color: var(--grey900);
+  text-align: center;
+}
+
+.home-action span {
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 800;
+}
+
 .home-tasks {
   margin: 14px 24px 0;
   padding: 12px 10px 10px;
@@ -2556,6 +2689,11 @@ svg {
   padding: 8px 24px 12px;
 }
 
+.time-grid.demo-fast {
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
 .time-grid div {
   display: grid;
   place-items: center;
@@ -2566,9 +2704,25 @@ svg {
   background: var(--surface-block);
 }
 
+.time-grid.demo-fast div {
+  height: 74px;
+  border-radius: 18px;
+}
+
 .time-grid strong {
   font-size: 31px;
   line-height: 34px;
+}
+
+.time-grid.demo-fast strong {
+  font-size: 25px;
+  line-height: 29px;
+  font-variant-numeric: tabular-nums;
+}
+
+.time-grid.demo-fast.is-spinning strong {
+  animation: digit-flicker 0.18s steps(2, end) infinite;
+  text-shadow: 0 8px 18px rgba(49, 104, 246, 0.14);
 }
 
 .time-grid span {
@@ -2576,6 +2730,20 @@ svg {
   font-size: 12px;
   line-height: 16px;
   font-weight: 700;
+}
+
+@keyframes digit-flicker {
+  0% {
+    opacity: 0.78;
+  }
+
+  50% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0.88;
+  }
 }
 
 .return-progress {
@@ -2891,20 +3059,6 @@ svg {
   height: 170px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--brand) 12%, transparent);
-}
-
-.stage-emoji {
-  position: absolute;
-  left: 22px;
-  top: 22px;
-  width: 48px;
-  height: 48px;
-  display: grid;
-  place-items: center;
-  border-radius: 18px;
-  background: #fff;
-  font-size: 25px;
-  box-shadow: 0 10px 24px rgba(25, 31, 40, 0.08);
 }
 
 .reputation-mascot {

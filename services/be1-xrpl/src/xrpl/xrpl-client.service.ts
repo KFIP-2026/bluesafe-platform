@@ -60,7 +60,7 @@ export class XrplClientService implements OnModuleInit, OnModuleDestroy {
    */
   async ensureTestnetXrpForFees(wallet: Wallet): Promise<void> {
     const client = this.getClient();
-    const minDrops = 10_000_000n;
+    const minDrops = 3_000_000n;
     try {
       const r = await client.request({
         command: 'account_info',

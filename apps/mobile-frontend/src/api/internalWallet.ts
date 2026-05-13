@@ -1,3 +1,5 @@
+import { demoAddresses, isDemoMode, isRealDemoTxMode, type DemoRole } from '../demoMode'
+
 type WalletRole = 'tenant' | 'landlord'
 
 const walletBaseUrl = (
@@ -80,6 +82,14 @@ export type InternalWalletIouFundResult = {
 }
 
 export async function connectInternalWallet(role: WalletRole) {
+  if (isDemoMode() && !isRealDemoTxMode()) {
+    return {
+      account: demoAddresses[role as DemoRole],
+      network: 'XRPL Testnet',
+      provider: 'BlueSafe Demo Wallet',
+    }
+  }
+
   const data = await walletRequest<WalletConnectResponse>('/api/wallet/connect', {
     method: 'POST',
     body: JSON.stringify({ approve: true, role }),

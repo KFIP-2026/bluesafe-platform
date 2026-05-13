@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { DemoSessionService } from './demo-session.service';
 import { WalletController } from './wallet.controller';
 import { WalletIouFundService } from './wallet-iou-fund.service';
 import { WalletPeerXrpService } from './wallet-peer-xrp.service';
@@ -6,7 +7,12 @@ import { WalletService } from './wallet.service';
 
 @Module({
   controllers: [WalletController],
-  providers: [WalletService, WalletIouFundService, WalletPeerXrpService],
+  providers: [
+    WalletService,
+    WalletIouFundService,
+    WalletPeerXrpService,
+    DemoSessionService,
+  ],
   exports: [WalletService],
 })
 export class WalletModule {}
